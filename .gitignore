@@ -1,0 +1,24 @@
+# Python cache/test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Training outputs
+experiments/**/*.csv
+experiments/**/*.jsonl
+experiments/**/*.png
+
+# Model/checkpoint outputs
+models/**/*.pkl
+models/**/*.pt
+models/**/*.pth
+
+# Local/editor noise
+.idea/
+.vscode/
+*.log
