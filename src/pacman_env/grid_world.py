@@ -526,7 +526,7 @@ class MiniPacmanEnv:
         remaining_food = self._remaining_food_positions(self.food_mask)
         if not remaining_food:
             return None
-        return min(self._manhattan(self.pacman_pos, food_pos) for food_pos in remaining_food)
+        return min(self._maze_distance(self.pacman_pos, food_pos) for food_pos in remaining_food)
 
     def _remaining_food_positions(self, food_mask: int) -> list[Position]:
         return [

@@ -1,137 +1,157 @@
-# So sanh Q-learning, DQN va Double DQN cho Pacman mini
+# So Sánh Q-Learning, DQN và Double DQN cho Pacman Mini
 
-## 1. Bai toan
+## 1. Bài Toán
 
-Pacman mini la mot moi truong dang luoi. Agent dieu khien Pacman di an thuc an, tranh ma, va toi da hoa tong reward.
+Pacman mini là một môi trường dạng lưới (grid-world). Agent điều khiển Pacman di ăn thức ăn, tránh ma, và tối đa hoá tổng reward.
 
-Trong scaffold nay:
+Trong project này:
 
-- Trang thai tabular gom vi tri Pacman, vi tri ma, so mang con lai va food mask.
-- Trang thai vector cho DQN/Double DQN gom vi tri da chuan hoa, so mang con lai va danh sach food con lai.
-- Hanh dong gom 4 huong: len, phai, xuong, trai.
-- Reward co ban: an food duoc thuong, thang duoc thuong lon, cham ma bi phat lon, moi buoc bi phat nhe.
-- Map danh gia mac dinh la `15x15`, `62` food, `3` ghost.
-- Moi episode co `3` mang; bi ghost bat thi reset Pacman/ghost va giu food da an, het mang moi tinh la `caught`.
-- Config chinh cua moi thuat toan la file `*_lr_001.yaml`, vi du `configs/dqn/dqn_lr_001.yaml`.
-- Config so sanh learning rate gom `*_lr_0001.yaml`, `*_lr_001.yaml`, `*_lr_01.yaml`.
-- Maze gan map Pac-Man goc hon: doi xung, nhieu pellet, ghost o trung tam va Pacman xuat phat phia duoi.
-- Ghost co ten chinh thuc trong code: `Blinky`, `Pinky`, `Inky`.
-- Ghost dung hanh vi gan Pac-Man goc: chase/scatter mode, Blinky duoi truc tiep, Pinky chan dau, Inky dung vector target va chon duong theo BFS trong maze.
-- Khong dung 4 ghost vi map 15x15 se qua chat va kho danh gia tien do an food.
+- **Trạng thái tabular** (Q-Learning): vị trí Pacman, vị trí ma, số mạng còn lại và food mask (bitmask).
+- **Trạng thái vector** (DQN / Double DQN): toạ độ đã chuẩn hoá, khoảng cách tương đối đến thức ăn gần nhất / ma gần nhất, danh sách thức ăn còn lại, và các đặc trưng phụ trợ (hướng nguy hiểm, ô tường xung quanh).
+- **Hành động**: 4 hướng — lên, phải, xuống, trái.
+- **Reward**: ăn thức ăn được thưởng, thắng được thưởng lớn, chạm ma bị phạt lớn, mỗi bước bị phạt nhỏ, reward shaping theo khoảng cách đến thức ăn và ma.
+- **Bản đồ**: `15×15`, `62` thức ăn, `3` ma.
+- **Mỗi episode** có `3` mạng; bị ma bắt thì reset vị trí Pacman/ma và giữ thức ăn đã ăn; hết mạng mới tính là `caught`.
 
-## 2. Q-learning
+### Môi Trường Đặc Biệt
 
-Q-learning luu truc tiep gia tri `Q(state, action)` trong bang.
+Ma được mô phỏng theo hành vi arcade gốc:
 
-Cong thuc cap nhat:
+| Tên | Hành vi |
+|---|---|
+| **Blinky** | Đuổi trực tiếp vị trí Pacman |
+| **Pinky** | Chặn đầu — nhắm 4 ô phía trước hướng di chuyển của Pacman |
+| **Inky** | Dùng vector qua Blinky và điểm 2 ô trước Pacman để tính mục tiêu |
 
-```text
-Q(s,a) <- Q(s,a) + alpha * (r + gamma * max_a' Q(s',a') - Q(s,a))
+Ma chuyển đổi giữa chế độ **scatter** (về góc) và **chase** (đuổi) theo lịch cố định, giống game gốc.
+
+---
+
+## 2. Tối Ưu Hiệu Năng — Precomputed BFS Distance Matrix
+
+Để tính khoảng cách mê cung (maze distance) chính xác mà không làm chậm quá trình train, môi trường chạy BFS **một lần duy nhất** từ mỗi ô tự do khi khởi tạo, xây dựng ma trận khoảng cách đầy đủ:
+
+```
+Thời gian: O(|ô mở| × (V + E)) — trả một lần khi init
+Truy vấn:  O(1) — trong mỗi bước của episode
+Bộ nhớ:   O(|ô mở|²) ≈ 130² ≈ 17.000 phần tử cho bản đồ 15×15
 ```
 
-Uu diem:
+Nhờ đó, cả khoảng cách đến **ma** và khoảng cách đến **thức ăn gần nhất** đều dùng khoảng cách maze thực tế (không phải Manhattan), đảm bảo reward shaping phản ánh đúng hành vi trong mê cung.
 
-- De cai dat, de giai thich.
-- Tot cho Pacman mini neu so trang thai nho.
-- Lam baseline ro rang de so voi DQN.
+---
 
-Nhuoc diem:
+## 3. Q-Learning
 
-- Khong mo rong tot khi grid lon, nhieu food, nhieu ma.
-- Can roi rac hoa state.
-- Khong tong quat hoa giua cac state gan nhau.
+Q-Learning lưu trực tiếp giá trị `Q(state, action)` trong bảng (Q-Table).
 
-## 3. DQN
+**Công thức cập nhật:**
 
-DQN thay bang Q-table bang neural network:
-
-```text
-Q(s, a; theta)
+```
+Q(s, a) ← Q(s, a) + α × (r + γ × max_a' Q(s', a') − Q(s, a))
 ```
 
-DQN thuong dung:
+**Ưu điểm:**
+- Dễ cài đặt, dễ giải thích.
+- Hội tụ nhanh khi không gian trạng thái nhỏ.
+- Làm baseline rõ ràng để so sánh với DQN.
 
-- Replay buffer de lay mau kinh nghiem ngau nhien.
-- Target network de tinh target on dinh hon.
-- Epsilon-greedy de can bang explore va exploit.
+**Nhược điểm:**
+- Không mở rộng tốt khi lưới lớn, nhiều thức ăn, nhiều ma.
+- Cần rời rạc hoá trạng thái — không tổng quát hoá giữa các trạng thái lân cận.
+- Kích thước Q-Table tăng theo số trạng thái đã thăm.
 
-Target cua DQN:
+---
 
-```text
-y = r + gamma * max_a' Q_target(s', a')
+## 4. DQN (Deep Q-Network)
+
+DQN thay Q-Table bằng mạng nơ-ron để ước lượng `Q(s, a; θ)`.
+
+**Các thành phần chính:**
+- **Replay Buffer**: lưu trữ kinh nghiệm `(s, a, r, s', done)` và lấy mẫu ngẫu nhiên để phá vỡ tương quan giữa các bước liên tiếp.
+- **Target Network**: bản sao của Q-Network được đồng bộ định kỳ, giúp mục tiêu học ổn định hơn.
+- **Epsilon-greedy**: cân bằng khám phá (explore) và khai thác (exploit).
+- **Gradient clipping**: ngăn gradient bùng nổ.
+- **Huber Loss** (`SmoothL1Loss`): ít nhạy cảm với outlier hơn MSE.
+
+**Target của DQN:**
+
+```
+y = r + γ × max_a' Q_target(s', a')
 ```
 
-Uu diem:
+**Ưu điểm:**
+- Làm việc tốt hơn với không gian trạng thái lớn hoặc vector/ảnh.
+- Có khả năng tổng quát hoá giữa các trạng thái gần nhau.
+- Phù hợp khi vector trạng thái phức tạp hơn trạng thái tabular.
 
-- Lam viec tot hon voi state lon hoac state vector/anh.
-- Co kha nang tong quat hoa.
-- Phu hop khi state vector phuc tap hon tabular state va can tong quat hoa giua cac vi tri gan nhau.
+**Nhược điểm:**
+- Cần nhiều dữ liệu và điều chỉnh siêu tham số hơn Q-Learning.
+- Có thể học không ổn định.
+- Dễ đánh giá Q-value quá cao (overestimation bias) do dùng phép `max` trong target.
 
-Nhuoc diem:
+---
 
-- Can nhieu du lieu va tuning hon Q-learning.
-- Co the hoc khong on dinh.
-- Hay danh gia Q-value qua cao vi cung dung phep max trong target.
+## 5. Double DQN (DDQN)
 
-## 4. Double DQN (DDQN)
+Double DQN tách việc **chọn hành động** và **đánh giá hành động** ra hai mạng khác nhau:
 
-Double DQN tach viec chon action va danh gia action:
-
-```text
-a* = argmax_a Q_online(s', a)
-y = r + gamma * Q_target(s', a*)
+```
+a* = argmax_a Q_online(s', a)       ← online network chọn hành động
+y  = r + γ × Q_target(s', a*)      ← target network đánh giá hành động đó
 ```
 
-Diem khac voi DQN:
+**Điểm khác với DQN:**
+- **DQN**: target network vừa chọn hành động tốt nhất, vừa đánh giá giá trị của hành động đó → dễ overestimate.
+- **Double DQN**: online network chọn, target network đánh giá → giảm overestimation bias.
 
-- DQN: target network vua gop phan chon action tot nhat, vua danh gia gia tri cua action do.
-- Double DQN: online network chon action, target network danh gia action.
+**Ưu điểm:**
+- Giảm overestimation bias một cách có hệ thống.
+- Thường ổn định hơn DQN, đặc biệt khi reward nhiễu và môi trường có tính ngẫu nhiên.
+- Phù hợp khi ghost có mục tiêu thông minh và môi trường khó hơn random ghost.
 
-Uu diem:
+**Nhược điểm:**
+- Phức tạp hơn DQN một chút.
+- Vẫn cần replay buffer, target network và điều chỉnh siêu tham số.
 
-- Giam overestimation bias.
-- Thuong on dinh hon DQN.
-- Phu hop khi reward nhieu nhieu va moi truong co tinh ngau nhien.
+---
 
-Nhuoc diem:
+## 6. Bảng So Sánh
 
-- Phuc tap hon DQN mot chut.
-- Van can replay buffer, target network va tuning.
-
-## 5. Bang so sanh
-
-| Tieu chi | Q-learning | DQN | Double DQN |
+| Tiêu chí | Q-Learning | DQN | Double DQN |
 |---|---|---|---|
-| Kieu ham Q | Bang | Neural network | Neural network |
-| Input | State roi rac | Vector/anh | Vector/anh |
-| Kha nang mo rong | Thap | Cao | Cao |
-| On dinh khi train | Cao voi state nho | Trung binh | Tot hon DQN |
-| Overestimation bias | Co the co | Ro hon | Giam dang ke |
-| Yeu cau tinh toan | Thap | Cao | Cao |
-| Do kho cai dat | De | Trung binh | Trung binh/cao |
-| Vai tro trong do an | Baseline | Deep RL baseline | Ban cai tien nen so sanh |
+| Kiểu hàm Q | Bảng tra cứu | Mạng nơ-ron | Mạng nơ-ron |
+| Đầu vào | Trạng thái rời rạc | Vector số thực | Vector số thực |
+| Khả năng mở rộng | Thấp | Cao | Cao |
+| Ổn định khi train | Cao (với state nhỏ) | Trung bình | Tốt hơn DQN |
+| Overestimation bias | Có thể có | Rõ hơn | Giảm đáng kể |
+| Yêu cầu tính toán | Thấp | Cao | Cao |
+| Độ khó cài đặt | Dễ | Trung bình | Trung bình |
+| Vai trò trong đồ án | Baseline tabular | Deep RL baseline | Biến thể cải tiến |
 
-## 6. Ky vong ket qua tren map 15x15
+---
 
-Voi map 15x15:
+## 7. Kỳ Vọng Kết Quả Trên Bản Đồ 15×15
 
-1. Q-learning co the hoc nhanh va on dinh vi state space con nho.
-2. DQN co the can nhieu episode hon de vuot Q-learning.
-3. Double DQN thuong co reward trung binh on dinh hon DQN, nhat la khi ghost co target thong minh va moi truong kho hon random ghost.
-4. Khi `ghost_chase_probability=1.0`, ghost se gan voi game goc hon, nen ket qua nen duoc doc kem `food_eaten` va `completion_rate`, khong chi nhin `win_rate`.
+1. **Q-Learning** có thể hội tụ nhanh và ổn định khi không gian trạng thái còn quản lý được.
+2. **DQN** có thể cần nhiều episode hơn để vượt Q-Learning, nhưng tổng quát hoá tốt hơn.
+3. **Double DQN** thường cho reward trung bình ổn định hơn DQN, nhất là khi ghost dùng AI thông minh (`ghost_chase_probability=1.0`).
+4. Khi đánh giá kết quả, nên đọc kết hợp `food_eaten`, `completion_rate` và `win_rate`, không chỉ nhìn vào reward vì reward shaping có thể làm lệch hướng đọc kết quả.
 
-## 7. Cach trinh bay trong bao cao
+---
 
-Nen chia ket qua theo cac muc:
+## 8. Cách Trình Bày Trong Báo Cáo
 
-- Duong reward trung binh moi 50 hoac 100 episode.
-- Ti le thang (win_rate).
-- So buoc trung binh moi episode.
-- So lan va cham ma.
-- Nhan xet ve do on dinh cua training.
+Nên chia kết quả theo các mục:
 
-Ket luan ngan gon:
+- Đường reward trung bình mỗi 50 hoặc 100 episode (moving average).
+- Tỉ lệ thắng (`win_rate`).
+- Số bước trung bình mỗi episode.
+- Tỉ lệ hoàn thành (`completion_rate`) — phần trăm thức ăn đã ăn.
+- Nhận xét về độ ổn định của quá trình huấn luyện.
 
-- Q-learning la baseline tot cho Pacman mini nho.
-- DQN mo rong tot hon khi state phuc tap.
-- Double DQN la cai tien cua DQN, thuong on dinh hon va giam viec danh gia Q-value qua cao.
+**Kết luận ngắn gọn:**
+
+- Q-Learning là baseline tốt cho Pacman mini với bản đồ nhỏ.
+- DQN mở rộng tốt hơn khi không gian trạng thái phức tạp.
+- Double DQN là cải tiến của DQN, thường ổn định hơn và giảm việc đánh giá Q-value quá cao.
