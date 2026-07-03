@@ -36,6 +36,7 @@ def latest_checkpoint_path(path: str | Path) -> Path:
 def save_q_learning_checkpoint(
     agent: QLearningAgent,
     args: Namespace,
+    env: MiniPacmanEnv,
     episode: int,
     elapsed_sec: float,
     win_count: int,
@@ -47,6 +48,7 @@ def save_q_learning_checkpoint(
         "metadata": {
             "algorithm": "Q-learning",
             "layout": getattr(args, "layout", "medium"),
+            "state_size": len(env._state()),
             "ghost_count": args.ghost_count,
             "ghost_chase_probability": args.ghost_chase_probability,
             "max_steps": args.max_steps,

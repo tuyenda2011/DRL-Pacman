@@ -59,6 +59,30 @@ Tôi đã thiết lập sẵn một script chạy 1-click. Lệnh này sẽ tự
 python run_all_experiments.py
 ```
 
+Chạy đủ 9 cấu hình learning-rate:
+
+```bash
+python run_all_experiments.py --all-lr
+```
+
+Xem trạng thái từng cấu hình mà chưa train:
+
+```bash
+python run_all_experiments.py --all-lr --status
+```
+
+Chạy kiểu thông minh: cấu hình đã đủ episode thì bỏ qua, cấu hình đang dở có checkpoint hợp lệ thì tự resume, cấu hình mới thì train từ đầu:
+
+```bash
+python run_all_experiments.py --all-lr --auto-resume
+```
+
+Nếu checkpoint cũ không còn tương thích sau khi đổi map/state, dùng cờ này để xoá artifact của cấu hình lỗi và train lại từ đầu:
+
+```bash
+python run_all_experiments.py --all-lr --auto-resume --restart-incompatible
+```
+
 ### Cách 2: Chạy Thủ Công Từng Thuật Toán
 
 Bạn có thể tự gọi các script train và chỉ định file cấu hình `.yaml`:

@@ -186,7 +186,7 @@ def train(args: argparse.Namespace) -> list[MetricRow]:
                 maybe_render_env(env.render(), episode, args.render_interval)
 
             if args.checkpoint_interval > 0 and episode % args.checkpoint_interval == 0:
-                checkpoint_path = save_q_learning_checkpoint(agent, args, episode, elapsed_sec, win_count)
+                checkpoint_path = save_q_learning_checkpoint(agent, args, env, episode, elapsed_sec, win_count)
                 print(f"Checkpoint saved to: {checkpoint_path}")
             if (
                 not interrupted

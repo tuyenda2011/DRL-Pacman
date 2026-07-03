@@ -461,7 +461,7 @@ class MiniPacmanEnv:
     ) -> Action:
         # Arcade-style ghosts choose the legal direction that minimizes maze
         # distance to their current target. ghost_chase_probability can lower
-        # determinism for easier experiments, but configs keep it at 1.0.
+        # determinism for easier experiments.
         candidate_distances = [
             self._maze_distance(self._move(ghost_pos, action, allow_ghost_door=True), target)
             for action in valid_actions
