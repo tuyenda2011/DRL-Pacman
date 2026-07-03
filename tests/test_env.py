@@ -12,13 +12,15 @@ def test_reset_returns_tabular_state_and_vector() -> None:
     assert env.width == 15
     assert env.height == 15
     assert len(env.food_positions) == 62
+    assert len(env.power_pellet_positions) == 4
     assert len(env.bonus_fruit_positions) == 2
+    assert len(env.ghost_doors) == 1
     assert len(env.ghost_positions) == 3
-    assert len(state) == 10
+    assert len(state) == 17
     assert env.lives_remaining == 3
     assert env.bonus_fruit_mask == 0b11
     assert vector.shape == (env.vector_size,)
-    assert env.vector_size == 2 + (2 * env.ghost_count) + 1 + len(env.food_positions) + 14
+    assert env.vector_size == 2 + (4 * env.ghost_count) + 2 + len(env.food_positions) + 14
     assert env.action_size == 4
     assert env.ghost_names == ("Blinky", "Pinky", "Inky")
 
@@ -28,7 +30,7 @@ def test_environment_can_use_two_ghosts() -> None:
     state = env.reset()
 
     assert len(env.ghost_positions) == 2
-    assert len(state) == 8
+    assert len(state) == 13
     assert env.ghost_names == ("Blinky", "Pinky")
     assert env.state_vector(state).shape == (env.vector_size,)
 
@@ -40,7 +42,7 @@ def test_medium_layout_supports_up_to_three_ghosts() -> None:
     assert env.width == 15
     assert env.height == 15
     assert len(env.ghost_positions) == 3
-    assert len(state) == 10
+    assert len(state) == 17
 
 
 def test_medium_layout_rejects_four_ghosts_as_too_hard() -> None:
@@ -57,6 +59,30 @@ def test_wall_blocks_movement() -> None:
     assert result.state[1] == start_state[1]
     assert result.info["event"] == "wall"
     assert result.reward < -1.0
+
+
+def test_ghost_house_door_blocks_pacman_but_allows_ghosts() -> None:
+    env = MiniPacmanEnv(seed=1)
+    env.reset()
+
+    assert env._move((5, 7), 2) == (5, 7)
+    assert env._move((7, 7), 0) == (7, 7)
+    assert env._move((7, 7), 0, allow_ghost_door=True) == (6, 7)
+    assert 0 in env._valid_actions((7, 7), allow_ghost_door=True)
+
+
+def test_food_and_bonus_fruits_are_not_placed_in_dead_ends() -> None:
+    env = MiniPacmanEnv(seed=1)
+    env.reset()
+
+    dead_ends = {
+        position
+        for position in env._open_positions()
+        if sum(env._move(position, action) != position for action in env.ACTIONS) <= 1
+    }
+
+    assert not dead_ends.intersection(env.food_positions)
+    assert not dead_ends.intersection(env.bonus_fruit_positions)
 
 
 def test_ghost_pathfinder_returns_valid_action() -> None:
@@ -91,11 +117,11 @@ def test_pacman_style_ghost_targets_use_chase_personalities() -> None:
     env = MiniPacmanEnv(ghost_count=2, seed=1)
     env.reset()
     env.steps = 30
-    env.pacman_pos = (7, 7)
+    env.pacman_pos = (1, 1)
     env.last_pacman_action = 1
 
-    assert env._ghost_target(0, env.ghost_positions[0]) == (7, 7)
-    assert env._ghost_target(1, env.ghost_positions[1]) == (7, 9)
+    assert env._ghost_target(0, env.ghost_positions[0]) == (1, 1)
+    assert env._ghost_target(1, env.ghost_positions[1]) == (1, 5)
 
 
 def test_ghosts_use_scatter_mode_before_chase_mode() -> None:
@@ -173,12 +199,81 @@ def test_bonus_fruit_can_be_eaten_once_for_reward() -> None:
     assert result.reward < env.BONUS_FRUIT_REWARD
 
 
+def test_power_pellet_activates_frightened_mode() -> None:
+    env = MiniPacmanEnv(ghost_count=1, ghost_chase_probability=0.0, seed=1)
+    env.reset()
+    pellet = env.power_pellet_positions[0]
+    action, start = _adjacent_start_for(env, pellet)
+    env.pacman_pos = start
+    env.ghost_positions = [env.ghost_starts[0]]
+
+    result = env.step(action)
+
+    assert env.pacman_pos == pellet
+    assert result.info["power_pellet_eaten"] is True
+    assert result.info["frightened_timer"] == env.FRIGHTENED_STEPS
+    assert env._ghost_mode() == "frightened"
+    assert result.reward >= env.FOOD_REWARD + env.POWER_PELLET_REWARD + env.STEP_PENALTY
+
+
+def test_frightened_pacman_eats_ghost_and_sends_eyes_home() -> None:
+    env = MiniPacmanEnv(ghost_count=1, seed=1)
+    env.reset()
+    env.frightened_timer = 10
+    env.pacman_pos = (1, 1)
+    env.ghost_positions = [(1, 2)]
+
+    result = env.step(1)
+
+    assert result.done is False
+    assert result.info["event"] == "ghost_eaten"
+    assert result.info["ghosts_eaten"] == 1
+    assert result.info["lives"] == 3
+    assert env.ghost_positions != env.ghost_starts[:1]
+    assert env.ghost_returning == [True]
+    assert env.ghost_respawn_timers == [0]
+    assert result.info["ghosts_returning"] == 1
+    assert result.reward >= env.GHOST_EAT_REWARD
+
+
+def test_eaten_ghost_returns_to_house_waits_then_respawns() -> None:
+    env = MiniPacmanEnv(ghost_count=1, seed=1)
+    env.reset()
+    env.ghost_positions = [(7, 7)]
+    env.ghost_returning = [True]
+    env.ghost_respawn_timers = [0]
+    env.pacman_pos = (7, 7)
+
+    assert env._is_caught() is False
+
+    env.ghost_positions = env._move_ghosts()
+
+    assert env.ghost_positions == env.ghost_starts[:1]
+    assert env.ghost_returning == [False]
+    assert env.ghost_respawn_timers == [env.GHOST_RESPAWN_WAIT_STEPS]
+    assert env._is_caught() is False
+
+    for _ in range(env.GHOST_RESPAWN_WAIT_STEPS):
+        env.ghost_positions = env._move_ghosts()
+
+    assert env.ghost_respawn_timers == [0]
+    assert env._ghost_can_catch(0) is True
+
+
 def test_render_marks_available_bonus_fruit() -> None:
     env = MiniPacmanEnv(seed=1)
     env.reset()
     row, col = env.bonus_fruit_positions[0]
 
     assert env.render().splitlines()[row][col] == "C"
+
+
+def _adjacent_start_for(env: MiniPacmanEnv, target: tuple[int, int]) -> tuple[int, tuple[int, int]]:
+    for action, (delta_row, delta_col) in env.ACTIONS.items():
+        start = (target[0] - delta_row, target[1] - delta_col)
+        if start not in env.walls and env._move(start, action) == target:
+            return action, start
+    raise AssertionError(f"No adjacent start can move into {target}")
 
 
 def test_timeout_keeps_terminal_event_and_penalty() -> None:

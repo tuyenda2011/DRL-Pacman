@@ -27,7 +27,12 @@ BLACK = "#000000"
 MAZE_BLUE = "#0033ff"
 MAZE_GLOW = "#001a80"
 PACMAN_YELLOW = "#ffff3d"
-FOOD_COLOR = "#ffffff"
+FOOD_COLOR = "#f4b08a"
+ARCADE_WHITE = "#f4f4ff"
+READY_YELLOW = "#ffe600"
+FRIGHTENED_BLUE = "#1f51ff"
+FRIGHTENED_FLASH = "#f4f4ff"
+GHOST_DOOR_COLOR = "#ffb8d8"
 FOOD_SIZE = 0.1
 CAPSULE_SIZE = 0.25
 GHOST_SIZE = 0.65
@@ -100,6 +105,7 @@ class PacmanViewer:
         self.last_action = "-"
         self.last_action_value: int | None = None
         self.last_event = "ready"
+        self.animation_frame = 0
         self.best_score = 0
         self.top_hud_height = int(self.cell_size * self.TOP_HUD_CELLS)
         self.bottom_hud_height = int(self.cell_size * self.BOTTOM_HUD_CELLS)
@@ -107,7 +113,7 @@ class PacmanViewer:
         self.board_y = self.top_hud_height
         self.board_width = env.width * self.cell_size
         self.board_height = env.height * self.cell_size
-        self.power_pellets = self._select_power_pellets()
+        self.power_pellets = set(env.power_pellet_positions)
 
         self.root.title(f"Mini Pacman - {algorithm}")
         self.root.configure(bg=BLACK)
@@ -166,6 +172,7 @@ class PacmanViewer:
         self.done = False
         self.last_action = "-"
         self.last_action_value = None
+        self.animation_frame = 0
         if self.ghost_demo:
             self.last_event = "ghost demo"
         else:
@@ -192,13 +199,21 @@ class PacmanViewer:
 
         action = self.action_fn(self.state)
         result = self.env.step(action)
+        self.animation_frame += 1
         self.state = result.state
         self.step_count += 1
         self.total_reward += result.reward
         self.done = result.done
         self.last_action = ACTION_NAMES[action]
         self.last_action_value = action
-        self.last_event = "fruit" if result.info.get("bonus_fruit_eaten") else str(result.info["event"])
+        if result.info.get("ghosts_eaten"):
+            self.last_event = "ghost eaten"
+        elif result.info.get("power_pellet_eaten"):
+            self.last_event = "power"
+        elif result.info.get("bonus_fruit_eaten"):
+            self.last_event = "fruit"
+        else:
+            self.last_event = str(result.info["event"])
 
         self.draw()
         self.root.after(self.delay_ms, self.step)
@@ -207,6 +222,7 @@ class PacmanViewer:
         self.env.steps += 1
         self.env.ghost_positions = self.env._move_ghosts()
         self.state = self.env._state()
+        self.animation_frame += 1
         self.step_count += 1
         self.last_action = "GHOST"
         self.last_action_value = None
@@ -218,6 +234,7 @@ class PacmanViewer:
         self.draw_title_hud()
         self.draw_maze_background()
         self.draw_maze_walls()
+        self.draw_ghost_doors()
 
         for index, (row, col) in enumerate(self.env.food_positions):
             if self.env.food_mask & (1 << index):
@@ -232,61 +249,54 @@ class PacmanViewer:
         if not self.ghost_demo:
             pacman_row, pacman_col = self.env.pacman_pos
             self.draw_pacman(pacman_row, pacman_col)
+        self.draw_ready_banner()
         self.draw_bottom_hud()
 
     def draw_title_hud(self) -> None:
         width = int(self.canvas["width"])
         score = max(0, int(round(self.total_reward * 100)))
         self.best_score = max(self.best_score, score)
-        title_font = ("Arial", max(22, int(self.cell_size * 0.95)), "bold")
         label_font = ("Courier New", max(8, int(self.cell_size * 0.25)), "bold")
         score_font = ("Courier New", max(9, int(self.cell_size * 0.28)), "bold")
         status_font = ("Courier New", max(8, int(self.cell_size * 0.23)), "bold")
 
         self.canvas.create_text(
-            width / 2,
-            self.cell_size * 1.15,
-            text="Pac-Man",
-            fill="#ffffff",
-            font=title_font,
-        )
-        self.canvas.create_text(
-            width * 0.24,
-            self.cell_size * 3.15,
+            width * 0.20,
+            self.cell_size * 0.85,
             text="1UP",
-            fill="#ffffff",
+            fill=ARCADE_WHITE,
             font=label_font,
         )
         self.canvas.create_text(
-            width * 0.53,
-            self.cell_size * 3.15,
+            width * 0.54,
+            self.cell_size * 0.85,
             text="HIGH SCORE",
-            fill="#ffffff",
+            fill=ARCADE_WHITE,
             font=label_font,
         )
         self.canvas.create_text(
-            width * 0.24,
-            self.cell_size * 3.48,
+            width * 0.20,
+            self.cell_size * 1.20,
             text=f"{score:05d}",
-            fill="#ffffff",
+            fill=ARCADE_WHITE,
             font=score_font,
         )
         self.canvas.create_text(
-            width * 0.53,
-            self.cell_size * 3.48,
+            width * 0.54,
+            self.cell_size * 1.20,
             text=f"{self.best_score:05d}",
-            fill="#ffffff",
+            fill=ARCADE_WHITE,
             font=score_font,
         )
         self.canvas.create_text(
             width / 2,
-            self.cell_size * 4.15,
+            self.cell_size * 2.65,
             text=(
                 f"{self.algorithm.upper()}  "
                 f"EP {self.episode}/{self.episodes}  "
                 f"STEP {self.step_count}  {self.last_action}  {self.last_event.upper()}"
             ),
-            fill="#f7f7f7",
+            fill=ARCADE_WHITE,
             font=status_font,
         )
 
@@ -326,9 +336,39 @@ class PacmanViewer:
                 self.canvas.create_line(*edge, fill=MAZE_GLOW, width=glow_width, capstyle=tk.ROUND)
                 self.canvas.create_line(*edge, fill=MAZE_BLUE, width=wall_width, capstyle=tk.ROUND)
 
+    def draw_ghost_doors(self) -> None:
+        door_width = max(2, int(self.cell_size * 0.10))
+        rows: dict[int, list[int]] = {}
+        for row, col in self.env.ghost_doors:
+            rows.setdefault(row, []).append(col)
+        for row, cols in rows.items():
+            sorted_cols = sorted(cols)
+            start_col = sorted_cols[0]
+            previous_col = sorted_cols[0]
+            for col in sorted_cols[1:] + [None]:
+                if col is not None and col == previous_col + 1:
+                    previous_col = col
+                    continue
+                x1, y1 = self.cell_origin(row, start_col)
+                x2, _ = self.cell_origin(row, previous_col)
+                y = y1 + self.cell_size * 0.54
+                self.canvas.create_line(
+                    x1 + self.cell_size * 0.08,
+                    y,
+                    x2 + self.cell_size * 0.92,
+                    y,
+                    fill=GHOST_DOOR_COLOR,
+                    width=door_width,
+                    capstyle=tk.BUTT,
+                )
+                if col is not None:
+                    start_col = col
+                    previous_col = col
+
     def draw_food(self, row: int, col: int) -> None:
         center_x, center_y = self.cell_center(row, col)
-        radius = self.cell_size * (CAPSULE_SIZE if (row, col) in self.power_pellets else FOOD_SIZE)
+        is_power_pellet = (row, col) in self.power_pellets
+        radius = self.cell_size * (CAPSULE_SIZE if is_power_pellet else FOOD_SIZE)
         self.canvas.create_oval(
             center_x - radius,
             center_y - radius,
@@ -337,6 +377,15 @@ class PacmanViewer:
             fill=FOOD_COLOR,
             outline="",
         )
+        if is_power_pellet:
+            self.canvas.create_oval(
+                center_x - radius * 0.62,
+                center_y - radius * 0.62,
+                center_x + radius * 0.62,
+                center_y + radius * 0.62,
+                fill="#ffe1c5",
+                outline="",
+            )
 
     def draw_pacman(self, row: int, col: int) -> None:
         pad = self.cell_size * 0.14
@@ -349,7 +398,7 @@ class PacmanViewer:
         center_y = (y1 + y2) / 2
         radius = (x2 - x1) / 2
         direction = self.last_action_value if self.last_action_value is not None else 1
-        mouth_angle = 34 if self.step_count % 2 == 0 else 22
+        mouth_angle = 38 if self.animation_frame % 2 == 0 else 18
         direction_angles = {
             0: -90,
             1: 0,
@@ -360,7 +409,15 @@ class PacmanViewer:
         upper = angle + math.radians(mouth_angle)
         lower = angle - math.radians(mouth_angle)
 
-        self.canvas.create_oval(x1, y1, x2, y2, fill=PACMAN_YELLOW, outline="#fff38a", width=2)
+        self.canvas.create_oval(
+            x1,
+            y1,
+            x2,
+            y2,
+            fill=PACMAN_YELLOW,
+            outline="#fff38a",
+            width=max(1, int(self.cell_size * 0.05)),
+        )
         self.canvas.create_polygon(
             center_x,
             center_y,
@@ -373,8 +430,15 @@ class PacmanViewer:
         )
 
     def draw_ghost(self, row: int, col: int, ghost_index: int) -> None:
+        is_returning = self.env.ghost_returning[ghost_index]
+        is_respawning = self.env.ghost_respawn_timers[ghost_index] > 0
         color = GHOST_COLORS[ghost_index % len(GHOST_COLORS)]
+        if self.env.frightened_timer > 0 and not is_respawning:
+            color = FRIGHTENED_BLUE
+            if self.env.frightened_timer <= 8 and self.animation_frame % 2 == 0:
+                color = FRIGHTENED_FLASH
         center_x, center_y = self.cell_center(row, col)
+        center_y += math.sin((self.animation_frame + ghost_index) * math.pi / 2) * self.cell_size * 0.035
         width = self.cell_size * 0.78
         height = self.cell_size * 0.88
         left = center_x - width / 2
@@ -384,6 +448,18 @@ class PacmanViewer:
         radius = width / 2
         side_top = top + radius
         foot_top = bottom - height * 0.18
+
+        if is_returning:
+            self.draw_ghost_eyes(
+                center_x,
+                top + height * 0.40,
+                width,
+                height,
+                row,
+                col,
+                self.env.ghost_starts[ghost_index],
+            )
+            return
 
         body_points: list[float] = [left, foot_top, left, side_top]
         for step in range(18):
@@ -401,7 +477,7 @@ class PacmanViewer:
         for sample in range(scallop_count * samples_per_scallop + 1):
             progress = sample / (scallop_count * samples_per_scallop)
             x = right - progress * width
-            wave = abs(math.sin(progress * scallop_count * math.pi))
+            wave = abs(math.sin(progress * scallop_count * math.pi + self.animation_frame * 0.9))
             y = foot_top + wave * (bottom - foot_top)
             body_points.extend([x, y])
 
@@ -412,13 +488,24 @@ class PacmanViewer:
             width=max(1, int(self.cell_size * 0.035)),
         )
 
+        self.draw_ghost_eyes(center_x, top + height * 0.40, width, height, row, col, self.env.pacman_pos)
+
+    def draw_ghost_eyes(
+        self,
+        center_x: float,
+        eye_y: float,
+        width: float,
+        height: float,
+        row: int,
+        col: int,
+        target: tuple[int, int],
+    ) -> None:
         eye_radius_x = width * 0.13
         eye_radius_y = height * 0.17
         pupil_radius = width * 0.055
-        eye_y = top + height * 0.40
         eye_offset_x = width * 0.20
-        look_x = _sign(self.env.pacman_pos[1] - col) * eye_radius_x * 0.34
-        look_y = _sign(self.env.pacman_pos[0] - row) * eye_radius_y * 0.24
+        look_x = _sign(target[1] - col) * eye_radius_x * 0.34
+        look_y = _sign(target[0] - row) * eye_radius_y * 0.24
         for eye_x in (center_x - eye_offset_x, center_x + eye_offset_x):
             self.canvas.create_oval(
                 eye_x - eye_radius_x,
@@ -436,6 +523,30 @@ class PacmanViewer:
                 fill="#1d4ed8",
                 outline="",
             )
+
+    def draw_ready_banner(self) -> None:
+        if self.map_only or self.ghost_demo or self.step_count > 0:
+            return
+        font = ("Courier New", max(13, int(self.cell_size * 0.44)), "bold")
+        x = self.board_x + self.board_width / 2
+        y = self.board_y + self.board_height * 0.58
+        padding_x = self.cell_size * 1.45
+        padding_y = self.cell_size * 0.40
+        self.canvas.create_rectangle(
+            x - padding_x,
+            y - padding_y,
+            x + padding_x,
+            y + padding_y,
+            fill=BLACK,
+            outline="",
+        )
+        self.canvas.create_text(
+            x,
+            y,
+            text="READY!",
+            fill=READY_YELLOW,
+            font=font,
+        )
 
     def draw_bottom_hud(self) -> None:
         y = self.board_y + self.board_height + self.cell_size * 0.68

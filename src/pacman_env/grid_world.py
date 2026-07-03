@@ -23,7 +23,9 @@ class StepResult:
 class MiniPacmanEnv:
     STEP_PENALTY = -0.1
     FOOD_REWARD = 10.0
+    POWER_PELLET_REWARD = 50.0
     BONUS_FRUIT_REWARD = 100.0
+    GHOST_EAT_REWARD = 200.0
     WIN_REWARD = 100.0
     CAUGHT_PENALTY = -50.0
     SURVIVAL_REWARD = 0.02
@@ -35,6 +37,9 @@ class MiniPacmanEnv:
     ACTION_DANGER_DISTANCE = 2
     TIMEOUT_PENALTY = -10.0
     WALL_HIT_PENALTY = -1.0
+    FRIGHTENED_STEPS = 35
+    FRIGHTENED_GHOST_MOVE_INTERVAL = 2
+    GHOST_RESPAWN_WAIT_STEPS = 4
 
     ACTIONS: dict[Action, Position] = {
         0: (-1, 0),
@@ -64,19 +69,19 @@ class MiniPacmanEnv:
 
     MEDIUM_LAYOUT = (
         "###############",
-        "#.....#.#.....#",
-        "#.###.#.#.###.#",
-        "#.#...#.#...#.#",
-        "#.#.###.###.#.#",
-        "#.....#.#.....#",
-        "### # GGG # ###",
-        "#...#     #...#",
-        "### # ### # ###",
-        "#.....#.#.....#",
-        "# # ### ### # #",
-        "#.#   # #   #.#",
-        "# ### # # ### #",
-        "#     .P.     #",
+        "#..... . .....#",
+        "#.##. # # .##.#",
+        "#.... # # ....#",
+        "# ##   .   ## #",
+        "#....     ....#",
+        "### ###=### ###",
+        "#...# GGG #...#",
+        "#   #######   #",
+        "#..... . .....#",
+        "# #    .    # #",
+        "#.. # # # # ..#",
+        "#.##. # # .##.#",
+        "#  ..  P  ..  #",
         "###############",
     )
 
@@ -111,11 +116,14 @@ class MiniPacmanEnv:
         self.rng = random.Random(seed)
 
         self.walls: set[Position] = set()
+        self.ghost_doors: set[Position] = set()
         self.food_positions: list[Position] = []
+        self.power_pellet_positions: list[Position] = []
         self.bonus_fruit_positions: list[Position] = []
         self.pacman_start: Position | None = None
         self.ghost_starts: list[Position] = []
         self._parse_layout()
+        self.power_pellet_positions = self._select_power_pellet_positions()
         self.bonus_fruit_positions = self._select_bonus_fruit_positions()
         self._validate_layout()
 
@@ -125,8 +133,11 @@ class MiniPacmanEnv:
 
         self.pacman_pos = self.pacman_start
         self.ghost_positions = list(self.ghost_starts[: self.ghost_count])
+        self.ghost_returning = [False] * self.ghost_count
+        self.ghost_respawn_timers = [0] * self.ghost_count
         self.food_mask = 0
         self.bonus_fruit_mask = 0
+        self.frightened_timer = 0
         self.lives_remaining = self.max_lives
         self.steps = 0
         self.last_pacman_action: Action = 1
@@ -142,12 +153,13 @@ class MiniPacmanEnv:
 
     @property
     def vector_size(self) -> int:
-        return 2 + (2 * self.ghost_count) + 1 + len(self.food_positions) + 14
+        return 2 + (4 * self.ghost_count) + 2 + len(self.food_positions) + 14
 
     def reset(self) -> State:
         self._reset_actor_positions()
         self.food_mask = (1 << len(self.food_positions)) - 1
         self.bonus_fruit_mask = (1 << len(self.bonus_fruit_positions)) - 1
+        self.frightened_timer = 0
         self.lives_remaining = self.max_lives
         self.steps = 0
         return self._state()
@@ -167,21 +179,39 @@ class MiniPacmanEnv:
             reward += self.WALL_HIT_PENALTY
             event = "wall"
 
-        if self._is_caught():
+        ghosts_eaten = self._eat_ghosts_at_pacman()
+        if ghosts_eaten:
+            reward += self.GHOST_EAT_REWARD * ghosts_eaten
+            event = "ghost_eaten"
+        elif self._is_caught():
             return self._handle_caught(reward + self.CAUGHT_PENALTY)
 
-        food_reward = self._eat_food_reward()
+        food_reward, power_pellet_eaten = self._eat_food_reward()
         bonus_fruit_reward = self._eat_bonus_fruit_reward()
         bonus_fruit_eaten = bonus_fruit_reward > 0.0
+        if power_pellet_eaten:
+            self.frightened_timer = self.FRIGHTENED_STEPS
+            event = "power_pellet"
         reward += food_reward + bonus_fruit_reward
         if food_reward == 0.0 and bonus_fruit_reward == 0.0 and self.food_mask != 0:
             reward += self._food_progress_reward(previous_food_distance)
         if self.food_mask == 0:
-            return self._finish(reward + self.WIN_REWARD, "win", bonus_fruit_eaten)
+            return self._finish(
+                reward + self.WIN_REWARD,
+                "win",
+                bonus_fruit_eaten,
+                power_pellet_eaten,
+                ghosts_eaten,
+            )
 
         self.ghost_positions = self._move_ghosts()
-        if self._is_caught():
-            return self._handle_caught(reward + self.CAUGHT_PENALTY, bonus_fruit_eaten)
+        moved_ghosts_eaten = self._eat_ghosts_at_pacman()
+        if moved_ghosts_eaten:
+            ghosts_eaten += moved_ghosts_eaten
+            reward += self.GHOST_EAT_REWARD * moved_ghosts_eaten
+            event = "ghost_eaten"
+        elif self._is_caught():
+            return self._handle_caught(reward + self.CAUGHT_PENALTY, bonus_fruit_eaten, power_pellet_eaten)
 
         reward += self._survival_reward(previous_ghost_distance)
 
@@ -190,22 +220,35 @@ class MiniPacmanEnv:
             done = True
             event = "timeout"
 
+        if self.frightened_timer > 0 and not power_pellet_eaten:
+            self.frightened_timer -= 1
+
         return StepResult(
             self._state(),
             reward,
             done,
-            self._step_info(event, bonus_fruit_eaten),
+            self._step_info(event, bonus_fruit_eaten, power_pellet_eaten, ghosts_eaten),
         )
 
     def state_vector(self, state: State | None = None) -> np.ndarray:
         state = state or self._state()
         pacman_row, pacman_col = state[0], state[1]
         ghost_values = state[2 : 2 + (2 * self.ghost_count)]
+        ghost_status_start = 2 + (2 * self.ghost_count)
+        ghost_returning_values = state[ghost_status_start : ghost_status_start + self.ghost_count]
+        ghost_respawn_start = ghost_status_start + self.ghost_count
+        ghost_respawn_values = state[ghost_respawn_start : ghost_respawn_start + self.ghost_count]
+        frightened_timer = state[-3]
         lives_remaining = state[-2]
         food_mask = state[-1]
         ghost_positions = [
             (ghost_values[index], ghost_values[index + 1])
             for index in range(0, len(ghost_values), 2)
+        ]
+        dangerous_ghost_positions = [
+            ghost_pos
+            for index, ghost_pos in enumerate(ghost_positions)
+            if ghost_returning_values[index] == 0 and ghost_respawn_values[index] == 0
         ]
         vector = [
             pacman_row / (self.height - 1),
@@ -214,15 +257,27 @@ class MiniPacmanEnv:
         for index, value in enumerate(ghost_values):
             denominator = self.height - 1 if index % 2 == 0 else self.width - 1
             vector.append(value / denominator)
+        vector.extend(float(value) for value in ghost_returning_values)
+        vector.extend(value / self.GHOST_RESPAWN_WAIT_STEPS for value in ghost_respawn_values)
         vector.append(lives_remaining / self.max_lives)
+        vector.append(frightened_timer / self.FRIGHTENED_STEPS)
         vector.extend(1.0 if food_mask & (1 << index) else 0.0 for index in range(len(self.food_positions)))
-        vector.extend(self._auxiliary_state_features((pacman_row, pacman_col), ghost_positions, food_mask))
+        vector.extend(
+            self._auxiliary_state_features(
+                (pacman_row, pacman_col),
+                dangerous_ghost_positions,
+                food_mask,
+                frightened_timer,
+            )
+        )
         return np.asarray(vector, dtype=np.float32)
 
     def render(self) -> str:
         cells = [[" " for _ in range(self.width)] for _ in range(self.height)]
         for row, col in self.walls:
             cells[row][col] = "#"
+        for row, col in self.ghost_doors:
+            cells[row][col] = "="
         for index, (row, col) in enumerate(self.food_positions):
             cells[row][col] = "." if self.food_mask & (1 << index) else " "
         for index, (row, col) in enumerate(self.bonus_fruit_positions):
@@ -230,8 +285,15 @@ class MiniPacmanEnv:
                 cells[row][col] = "C"
         pacman_row, pacman_col = self.pacman_pos
         cells[pacman_row][pacman_col] = "P"
-        for ghost_row, ghost_col in self.ghost_positions:
-            cells[ghost_row][ghost_col] = "G" if (ghost_row, ghost_col) != self.pacman_pos else "X"
+        for index, (ghost_row, ghost_col) in enumerate(self.ghost_positions):
+            if self.ghost_returning[index]:
+                cells[ghost_row][ghost_col] = "E"
+            elif self.ghost_respawn_timers[index] > 0:
+                cells[ghost_row][ghost_col] = "R"
+            else:
+                cells[ghost_row][ghost_col] = "F" if self.frightened_timer > 0 else "G"
+            if (ghost_row, ghost_col) == self.pacman_pos and self._ghost_can_catch(index):
+                cells[ghost_row][ghost_col] = "X"
         return "\n".join("".join(row) for row in cells)
 
     def _parse_layout(self) -> None:
@@ -242,6 +304,8 @@ class MiniPacmanEnv:
                 pos = (row_index, col_index)
                 if cell == "#":
                     self.walls.add(pos)
+                elif cell == "=":
+                    self.ghost_doors.add(pos)
                 elif cell == "P":
                     self.pacman_start = pos
                 elif cell == "G":
@@ -273,11 +337,33 @@ class MiniPacmanEnv:
             and position not in unavailable
         ]
 
+    def _select_power_pellet_positions(self) -> list[Position]:
+        corners = [
+            (0, 0),
+            (0, self.width - 1),
+            (self.height - 1, 0),
+            (self.height - 1, self.width - 1),
+        ]
+        selected: list[Position] = []
+        for corner in corners:
+            if not self.food_positions:
+                break
+            pellet = min(
+                self.food_positions,
+                key=lambda pos: self._manhattan(pos, corner),
+            )
+            if pellet not in selected:
+                selected.append(pellet)
+        return selected
+
     def _state(self) -> State:
         pacman_row, pacman_col = self.pacman_pos
         values: list[int] = [pacman_row, pacman_col]
         for ghost_row, ghost_col in self.ghost_positions:
             values.extend([ghost_row, ghost_col])
+        values.extend(1 if returning else 0 for returning in self.ghost_returning)
+        values.extend(self.ghost_respawn_timers)
+        values.append(self.frightened_timer)
         values.append(self.lives_remaining)
         values.append(self.food_mask)
         return tuple(values)
@@ -285,13 +371,20 @@ class MiniPacmanEnv:
     def _reset_actor_positions(self) -> None:
         self.pacman_pos = self.pacman_start
         self.ghost_positions = list(self.ghost_starts[: self.ghost_count])
+        self.ghost_returning = [False] * self.ghost_count
+        self.ghost_respawn_timers = [0] * self.ghost_count
+        self.frightened_timer = 0
         self.last_pacman_action = 1
         self.ghost_last_actions = [None] * self.ghost_count
 
-    def _move(self, position: Position, action: Action) -> Position:
+    def _move(self, position: Position, action: Action, *, allow_ghost_door: bool = False) -> Position:
         delta_row, delta_col = self.ACTIONS[action]
         candidate = (position[0] + delta_row, position[1] + delta_col)
+        if not (0 <= candidate[0] < self.height and 0 <= candidate[1] < self.width):
+            return position
         if candidate in self.walls:
+            return position
+        if candidate in self.ghost_doors and not allow_ghost_door:
             return position
         return candidate
 
@@ -306,15 +399,59 @@ class MiniPacmanEnv:
         return next_positions
 
     def _move_ghost(self, ghost_pos: Position, ghost_index: int) -> tuple[Position, Action | None]:
-        valid_actions = self._valid_actions(ghost_pos)
+        if self.ghost_respawn_timers[ghost_index] > 0:
+            self.ghost_respawn_timers[ghost_index] -= 1
+            return ghost_pos, None
+
+        if self.ghost_returning[ghost_index]:
+            target = self.ghost_starts[ghost_index]
+            if ghost_pos == target:
+                self.ghost_returning[ghost_index] = False
+                self.ghost_respawn_timers[ghost_index] = self.GHOST_RESPAWN_WAIT_STEPS
+                return ghost_pos, None
+            valid_actions = self._valid_actions(ghost_pos, allow_ghost_door=True)
+            if not valid_actions:
+                return ghost_pos, None
+            action = self._next_action_toward(
+                ghost_pos,
+                target,
+                valid_actions,
+                allow_ghost_door=True,
+            )
+            next_pos = self._move(ghost_pos, action, allow_ghost_door=True)
+            if next_pos == target:
+                self.ghost_returning[ghost_index] = False
+                self.ghost_respawn_timers[ghost_index] = self.GHOST_RESPAWN_WAIT_STEPS
+            return next_pos, action
+
+        valid_actions = self._valid_actions(ghost_pos, allow_ghost_door=True)
         if not valid_actions:
             return ghost_pos, None
+
+        if self.frightened_timer > 0:
+            if self.steps % self.FRIGHTENED_GHOST_MOVE_INTERVAL != 0:
+                return ghost_pos, None
+            action = self._frightened_ghost_action(ghost_pos, valid_actions)
+            return self._move(ghost_pos, action, allow_ghost_door=True), action
 
         valid_actions = self._without_reverse_action(ghost_index, valid_actions)
 
         target = self._ghost_target(ghost_index, ghost_pos)
         action = self._directional_ghost_action(ghost_pos, target, valid_actions)
-        return self._move(ghost_pos, action), action
+        return self._move(ghost_pos, action, allow_ghost_door=True), action
+
+    def _frightened_ghost_action(self, ghost_pos: Position, valid_actions: list[Action]) -> Action:
+        candidate_distances = [
+            self._maze_distance(self._move(ghost_pos, action, allow_ghost_door=True), self.pacman_pos)
+            for action in valid_actions
+        ]
+        best_distance = max(candidate_distances)
+        best_actions = [
+            action
+            for action, distance in zip(valid_actions, candidate_distances)
+            if distance == best_distance
+        ]
+        return self.rng.choice(best_actions)
 
     def _directional_ghost_action(
         self,
@@ -326,7 +463,7 @@ class MiniPacmanEnv:
         # distance to their current target. ghost_chase_probability can lower
         # determinism for easier experiments, but configs keep it at 1.0.
         candidate_distances = [
-            self._maze_distance(self._move(ghost_pos, action), target)
+            self._maze_distance(self._move(ghost_pos, action, allow_ghost_door=True), target)
             for action in valid_actions
         ]
         best_distance = min(candidate_distances)
@@ -344,11 +481,11 @@ class MiniPacmanEnv:
             action_weights[action] += self.ghost_chase_probability / len(best_actions)
         return self._choose_weighted_action(action_weights)
 
-    def _valid_actions(self, position: Position) -> list[Action]:
+    def _valid_actions(self, position: Position, *, allow_ghost_door: bool = False) -> list[Action]:
         return [
             action
             for action in self.ACTIONS
-            if self._move(position, action) != position
+            if self._move(position, action, allow_ghost_door=allow_ghost_door) != position
         ]
 
     def _ghost_target(self, ghost_index: int, ghost_pos: Position) -> Position:
@@ -366,6 +503,8 @@ class MiniPacmanEnv:
         return self.pacman_pos
 
     def _ghost_mode(self) -> str:
+        if self.frightened_timer > 0:
+            return "frightened"
         elapsed = self.steps
         for mode, duration in self.SCATTER_CHASE_SCHEDULE:
             if duration is None:
@@ -438,6 +577,8 @@ class MiniPacmanEnv:
         start: Position,
         target: Position,
         fallback_actions: list[Action],
+        *,
+        allow_ghost_door: bool = False,
     ) -> Action:
         if start == target:
             return self.rng.choice(fallback_actions)
@@ -457,7 +598,7 @@ class MiniPacmanEnv:
             if position == target and position in first_action:
                 return first_action[position]
             for action in self.ACTIONS:
-                next_position = self._move(position, action)
+                next_position = self._move(position, action, allow_ghost_door=allow_ghost_door)
                 if next_position == position or next_position in visited:
                     continue
                 visited.add(next_position)
@@ -466,7 +607,10 @@ class MiniPacmanEnv:
 
         return min(
             fallback_actions,
-            key=lambda action: self._manhattan(self._move(start, action), target),
+            key=lambda action: self._manhattan(
+                self._move(start, action, allow_ghost_door=allow_ghost_door),
+                target,
+            ),
         )
 
     def _maze_distance(self, start: Position, target: Position) -> int:
@@ -507,13 +651,17 @@ class MiniPacmanEnv:
             if (row, col) not in self.walls
         ]
 
-    def _eat_food_reward(self) -> float:
+    def _eat_food_reward(self) -> tuple[float, bool]:
         reward = 0.0
+        power_pellet_eaten = False
         for index, food_pos in enumerate(self.food_positions):
             if self.pacman_pos == food_pos and self.food_mask & (1 << index):
                 self.food_mask &= ~(1 << index)
                 reward += self.FOOD_REWARD
-        return reward
+                if food_pos in self.power_pellet_positions:
+                    power_pellet_eaten = True
+                    reward += self.POWER_PELLET_REWARD
+        return reward, power_pellet_eaten
 
     def _eat_bonus_fruit_reward(self) -> float:
         reward = 0.0
@@ -547,9 +695,16 @@ class MiniPacmanEnv:
 
     def _nearest_ghost_distance(self) -> int:
         """Maze distance to the nearest ghost (uses precomputed BFS matrix)."""
+        ghost_positions = [
+            ghost_pos
+            for index, ghost_pos in enumerate(self.ghost_positions)
+            if self._ghost_can_catch(index)
+        ]
+        if not ghost_positions:
+            return (self.height - 1) + (self.width - 1)
         return min(
             self._maze_distance(self.pacman_pos, ghost_pos)
-            for ghost_pos in self.ghost_positions
+            for ghost_pos in ghost_positions
         )
 
     def _nearest_food_distance(self) -> int | None:
@@ -570,6 +725,7 @@ class MiniPacmanEnv:
         pacman_pos: Position,
         ghost_positions: list[Position],
         food_mask: int,
+        frightened_timer: int,
     ) -> list[float]:
         nearest_food = self._nearest_position(pacman_pos, self._remaining_food_positions(food_mask))
         nearest_ghost = self._nearest_position(pacman_pos, ghost_positions)
@@ -579,7 +735,7 @@ class MiniPacmanEnv:
         features.extend(1.0 if self._move(pacman_pos, action) != pacman_pos else 0.0 for action in self.ACTIONS)
         features.extend(
             1.0
-            if self._action_moves_toward_danger(pacman_pos, action, ghost_positions)
+            if self._action_moves_toward_danger(pacman_pos, action, ghost_positions, frightened_timer)
             else 0.0
             for action in self.ACTIONS
         )
@@ -603,7 +759,12 @@ class MiniPacmanEnv:
         pacman_pos: Position,
         action: Action,
         ghost_positions: list[Position],
+        frightened_timer: int = 0,
     ) -> bool:
+        if frightened_timer > 0:
+            return False
+        if not ghost_positions:
+            return False
         candidate = self._move(pacman_pos, action)
         nearest_distance = min(
             self._manhattan(candidate, ghost_pos)
@@ -611,10 +772,15 @@ class MiniPacmanEnv:
         )
         return nearest_distance <= self.ACTION_DANGER_DISTANCE
 
-    def _handle_caught(self, reward: float, bonus_fruit_eaten: bool = False) -> StepResult:
+    def _handle_caught(
+        self,
+        reward: float,
+        bonus_fruit_eaten: bool = False,
+        power_pellet_eaten: bool = False,
+    ) -> StepResult:
         self.lives_remaining -= 1
         if self.lives_remaining <= 0:
-            return self._finish(reward, "caught", bonus_fruit_eaten)
+            return self._finish(reward, "caught", bonus_fruit_eaten, power_pellet_eaten)
 
         self._reset_actor_positions()
         if self.steps >= self.max_steps:
@@ -622,35 +788,80 @@ class MiniPacmanEnv:
                 self._state(),
                 reward + self.TIMEOUT_PENALTY,
                 True,
-                self._step_info("timeout", bonus_fruit_eaten),
+                self._step_info("timeout", bonus_fruit_eaten, power_pellet_eaten),
             )
 
         return StepResult(
             self._state(),
             reward,
             False,
-            self._step_info("life_lost", bonus_fruit_eaten),
+            self._step_info("life_lost", bonus_fruit_eaten, power_pellet_eaten),
         )
 
-    def _finish(self, reward: float, event: str, bonus_fruit_eaten: bool = False) -> StepResult:
+    def _finish(
+        self,
+        reward: float,
+        event: str,
+        bonus_fruit_eaten: bool = False,
+        power_pellet_eaten: bool = False,
+        ghosts_eaten: int = 0,
+    ) -> StepResult:
         return StepResult(
             self._state(),
             reward,
             True,
-            self._step_info(event, bonus_fruit_eaten),
+            self._step_info(event, bonus_fruit_eaten, power_pellet_eaten, ghosts_eaten),
         )
 
-    def _step_info(self, event: str, bonus_fruit_eaten: bool = False) -> dict[str, object]:
+    def _step_info(
+        self,
+        event: str,
+        bonus_fruit_eaten: bool = False,
+        power_pellet_eaten: bool = False,
+        ghosts_eaten: int = 0,
+    ) -> dict[str, object]:
         return {
             "event": event,
             "steps": self.steps,
             "lives": self.lives_remaining,
             "bonus_fruit_eaten": bonus_fruit_eaten,
             "bonus_fruits_remaining": self.bonus_fruit_mask.bit_count(),
+            "power_pellet_eaten": power_pellet_eaten,
+            "frightened_timer": self.frightened_timer,
+            "ghosts_eaten": ghosts_eaten,
+            "ghosts_returning": sum(1 for returning in self.ghost_returning if returning),
+            "ghosts_respawning": sum(1 for timer in self.ghost_respawn_timers if timer > 0),
         }
 
     def _is_caught(self) -> bool:
-        return self.pacman_pos in self.ghost_positions
+        return any(
+            self.pacman_pos == ghost_pos and self._ghost_can_catch(index)
+            for index, ghost_pos in enumerate(self.ghost_positions)
+        )
+
+    def _eat_ghosts_at_pacman(self) -> int:
+        if self.frightened_timer <= 0:
+            return 0
+        eaten = 0
+        for index, ghost_pos in enumerate(self.ghost_positions):
+            if (
+                ghost_pos == self.pacman_pos
+                and not self.ghost_returning[index]
+                and self.ghost_respawn_timers[index] == 0
+            ):
+                self.ghost_returning[index] = True
+                self.ghost_respawn_timers[index] = 0
+                if index < len(self.ghost_last_actions):
+                    self.ghost_last_actions[index] = None
+                eaten += 1
+        return eaten
+
+    def _ghost_can_catch(self, ghost_index: int) -> bool:
+        return (
+            self.frightened_timer <= 0
+            and not self.ghost_returning[ghost_index]
+            and self.ghost_respawn_timers[ghost_index] == 0
+        )
 
     @staticmethod
     def _manhattan(left: Position, right: Position) -> int:
@@ -671,7 +882,7 @@ class MiniPacmanEnv:
             while queue:
                 position = queue.popleft()
                 for action in self.ACTIONS:
-                    neighbour = self._move(position, action)
+                    neighbour = self._move(position, action, allow_ghost_door=True)
                     if neighbour == position or neighbour in distances:
                         continue
                     distances[neighbour] = distances[position] + 1

@@ -6,11 +6,11 @@ Pacman mini là một môi trường dạng lưới (grid-world). Agent điều 
 
 Trong project này:
 
-- **Trạng thái tabular** (Q-Learning): vị trí Pacman, vị trí ma, số mạng còn lại và food mask (bitmask).
-- **Trạng thái vector** (DQN / Double DQN): toạ độ đã chuẩn hoá, khoảng cách tương đối đến thức ăn gần nhất / ma gần nhất, danh sách thức ăn còn lại, và các đặc trưng phụ trợ (hướng nguy hiểm, ô tường xung quanh).
+- **Trạng thái tabular** (Q-Learning): vị trí Pacman, vị trí ma, trạng thái ma đang quay về house / chờ hồi sinh, thời gian frightened còn lại, số mạng còn lại và food mask (bitmask).
+- **Trạng thái vector** (DQN / Double DQN): toạ độ đã chuẩn hoá, trạng thái ma đang quay về house / chờ hồi sinh, thời gian frightened còn lại, khoảng cách tương đối đến thức ăn gần nhất / ma nguy hiểm gần nhất, danh sách thức ăn còn lại, và các đặc trưng phụ trợ (hướng nguy hiểm, ô tường xung quanh).
 - **Hành động**: 4 hướng — lên, phải, xuống, trái.
-- **Reward**: ăn thức ăn được thưởng, thắng được thưởng lớn, chạm ma bị phạt lớn, mỗi bước bị phạt nhỏ, reward shaping theo khoảng cách đến thức ăn và ma.
-- **Bản đồ**: `15×15`, `62` thức ăn, `3` ma.
+- **Reward**: ăn thức ăn/cherry/power pellet được thưởng, ăn ghost khi frightened được thưởng lớn, thắng được thưởng lớn, chạm ma khi không frightened bị phạt lớn, mỗi bước bị phạt nhỏ, reward shaping theo khoảng cách đến thức ăn và ma.
+- **Bản đồ**: `15×15`, `62` thức ăn, `4` power pellet, `2` cherry, `3` ma.
 - **Mỗi episode** có `3` mạng; bị ma bắt thì reset vị trí Pacman/ma và giữ thức ăn đã ăn; hết mạng mới tính là `caught`.
 
 ### Môi Trường Đặc Biệt
@@ -23,7 +23,7 @@ Ma được mô phỏng theo hành vi arcade gốc:
 | **Pinky** | Chặn đầu — nhắm 4 ô phía trước hướng di chuyển của Pacman |
 | **Inky** | Dùng vector qua Blinky và điểm 2 ô trước Pacman để tính mục tiêu |
 
-Ma chuyển đổi giữa chế độ **scatter** (về góc) và **chase** (đuổi) theo lịch cố định, giống game gốc.
+Ma chuyển đổi giữa chế độ **scatter** (về góc) và **chase** (đuổi) theo lịch cố định, giống game gốc. Khi Pacman ăn power pellet, ma chuyển sang **frightened**, chạy chậm hơn, cố đi xa Pacman và có thể bị Pacman ăn. Ghost bị ăn chỉ còn đôi mắt chạy về house, chờ vài bước rồi hồi sinh và chạy ra lại.
 
 ---
 
@@ -135,7 +135,7 @@ y  = r + γ × Q_target(s', a*)      ← target network đánh giá hành độn
 
 1. **Q-Learning** có thể hội tụ nhanh và ổn định khi không gian trạng thái còn quản lý được.
 2. **DQN** có thể cần nhiều episode hơn để vượt Q-Learning, nhưng tổng quát hoá tốt hơn.
-3. **Double DQN** thường cho reward trung bình ổn định hơn DQN, nhất là khi ghost dùng AI thông minh (`ghost_chase_probability=1.0`).
+3. **Double DQN** thường cho reward trung bình ổn định hơn DQN, nhất là khi ghost dùng AI thông minh và cùng mức độ khó giữa các thí nghiệm.
 4. Khi đánh giá kết quả, nên đọc kết hợp `food_eaten`, `completion_rate` và `win_rate`, không chỉ nhìn vào reward vì reward shaping có thể làm lệch hướng đọc kết quả.
 
 ---

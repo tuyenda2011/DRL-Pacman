@@ -5,7 +5,7 @@ Project so sánh 3 cách tiếp cận Reinforcement Learning cho bài toán Pacm
 - `DQN`: Dùng neural network để ước lượng Q-value, khắc phục hạn chế về bộ nhớ của Q-Table.
 - `Double DQN`: Biến thể DQN giúp giảm thiểu hiện tượng đánh giá quá mức (overestimation bias).
 
-Môi trường mặc định là map Pacman `15x15`, có `62` food, `3` ghost, `3` mạng. Ghost thông minh được mô phỏng theo game gốc: `Blinky` (đuổi trực tiếp), `Pinky` (chặn đầu), `Inky` (chọn điểm chặn qua vector). Môi trường đã được tinh chỉnh tối ưu hiệu năng để train với tốc độ cực cao (sử dụng ma trận BFS tính sẵn).
+Môi trường mặc định là map Pacman `15x15`, có `62` food, `4` power pellet, `2` cherry, `3` ghost, `3` mạng. Ghost thông minh được mô phỏng theo game gốc: `Blinky` (đuổi trực tiếp), `Pinky` (chặn đầu), `Inky` (chọn điểm chặn qua vector). Power pellet làm ghost chuyển sang trạng thái frightened để Pacman có thể ăn ghost trong thời gian ngắn; ghost bị ăn chỉ còn đôi mắt chạy về house, chờ vài bước rồi hồi sinh. Môi trường đã được tinh chỉnh tối ưu hiệu năng để train với tốc độ cực cao (sử dụng ma trận BFS tính sẵn).
 
 ---
 
