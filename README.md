@@ -117,6 +117,12 @@ python -m src.training.watch_model --algorithm dqn
 
 # Xem Double DQN
 python -m src.training.watch_model --algorithm double_dqn
+
+# Xem dung config/run cu the, vi du DQN lr=0.0001
+python -m src.training.watch_model --config configs/dqn/dqn_lr_0001.yaml
+
+# Uu tien checkpoint moi nhat thay vi final model
+python -m src.training.watch_model --config configs/dqn/dqn_lr_0001.yaml --prefer-checkpoint
 ```
 
 Script sẽ tự động tìm kiếm file model final hoặc checkpoint mới nhất của thuật toán tương ứng để biểu diễn. Giao diện được thiết kế theo đúng phong cách Pac-Man cổ điển (nền đen, tường xanh Berkeley).

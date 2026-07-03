@@ -8,6 +8,11 @@ from typing import Callable
 
 from src.algorithms.q_learning.agent import QLearningAgent
 from src.pacman_env.grid_world import MiniPacmanEnv, State
+from src.training.checkpointing import (
+    latest_checkpoint_path,
+    load_deep_q_checkpoint,
+    load_q_learning_checkpoint,
+)
 from src.training.config_utils import load_config_defaults
 
 
@@ -31,6 +36,11 @@ GHOST_COLORS = [
     "#ffb8ff",  # Pinky
     "#00ffff",  # Inky
 ]
+MODEL_EXTENSIONS = {
+    "q_learning": "pkl",
+    "dqn": "pt",
+    "double_dqn": "pt",
+}
 
 CONFIG_PATHS = {
     "q_learning": "configs/q_learning/q_learning_lr_001.yaml",
@@ -39,6 +49,7 @@ CONFIG_PATHS = {
 }
 
 WATCH_CONFIG_KEYS = {
+    "algorithm",
     "ghost_count",
     "ghost_chase_probability",
     "hidden_size",
@@ -46,6 +57,8 @@ WATCH_CONFIG_KEYS = {
     "max_lives",
     "max_steps",
     "model_output",
+    "checkpoint_path",
+    "run_name",
     "seed",
 }
 
@@ -95,7 +108,6 @@ class PacmanViewer:
         self.board_width = env.width * self.cell_size
         self.board_height = env.height * self.cell_size
         self.power_pellets = self._select_power_pellets()
-        self.bonus_fruits = self._select_bonus_fruits()
 
         self.root.title(f"Mini Pacman - {algorithm}")
         self.root.configure(bg=BLACK)
@@ -186,7 +198,7 @@ class PacmanViewer:
         self.done = result.done
         self.last_action = ACTION_NAMES[action]
         self.last_action_value = action
-        self.last_event = str(result.info["event"])
+        self.last_event = "fruit" if result.info.get("bonus_fruit_eaten") else str(result.info["event"])
 
         self.draw()
         self.root.after(self.delay_ms, self.step)
@@ -211,8 +223,9 @@ class PacmanViewer:
             if self.env.food_mask & (1 << index):
                 self.draw_food(row, col)
 
-        for row, col in self.bonus_fruits:
-            self.draw_cherry_pair_at_cell(row, col)
+        for index, (row, col) in enumerate(self.env.bonus_fruit_positions):
+            if self.env.bonus_fruit_mask & (1 << index):
+                self.draw_cherry_pair_at_cell(row, col)
 
         for ghost_index, (ghost_row, ghost_col) in enumerate(self.env.ghost_positions):
             self.draw_ghost(ghost_row, ghost_col, ghost_index)
@@ -432,7 +445,8 @@ class PacmanViewer:
             for index in range(self.env.lives_remaining):
                 self.draw_life_icon(x + index * self.cell_size * 0.48, y)
             fruit_x = x + self.cell_size * 1.8
-        for index in range(len(self.bonus_fruits)):
+        eaten_bonus_fruits = len(self.env.bonus_fruit_positions) - self.env.bonus_fruit_mask.bit_count()
+        for index in range(eaten_bonus_fruits):
             self.draw_cherry_pair(fruit_x + index * self.cell_size * 0.48, y, self.cell_size * 0.62)
 
     def draw_life_icon(self, x: float, y: float) -> None:
@@ -542,15 +556,6 @@ class PacmanViewer:
             )
         return selected
 
-    def _select_bonus_fruits(self) -> list[tuple[int, int]]:
-        preferred = [(3, 3), (11, 11)]
-        unavailable = {self.env.pacman_start, *self.env.ghost_starts}
-        return [
-            position
-            for position in preferred
-            if position not in self.env.walls and position not in unavailable
-        ]
-
 
 def _sign(value: int) -> int:
     if value < 0:
@@ -560,14 +565,19 @@ def _sign(value: int) -> int:
     return 0
 
 
-def build_action_fn(args: argparse.Namespace, env: MiniPacmanEnv) -> Callable[[State], int]:
-    model_path = Path(args.model_path)
-    if not model_path.exists():
-        raise SystemExit(f"Model file not found: {model_path}")
-
+def build_action_fn(
+    args: argparse.Namespace,
+    env: MiniPacmanEnv,
+    model_path: Path,
+    model_source: str,
+) -> Callable[[State], int]:
     if args.algorithm == "q_learning":
         agent = QLearningAgent(action_size=env.action_size, epsilon=0.0, seed=args.seed)
-        agent.load(model_path)
+        if model_source == "checkpoint":
+            load_q_learning_checkpoint(agent, model_path)
+            agent.epsilon = 0.0
+        else:
+            agent.load(model_path)
         return lambda state: agent.select_action(state)
 
     if args.algorithm == "dqn":
@@ -585,7 +595,11 @@ def build_action_fn(args: argparse.Namespace, env: MiniPacmanEnv) -> Callable[[S
             epsilon=0.0,
             seed=args.seed,
         )
-        agent.load(model_path)
+        if model_source == "checkpoint":
+            load_deep_q_checkpoint(agent, model_path)
+            agent.epsilon = 0.0
+        else:
+            agent.load(model_path)
         return lambda state: agent.select_action(env.state_vector(state))
 
     if args.algorithm == "double_dqn":
@@ -603,26 +617,60 @@ def build_action_fn(args: argparse.Namespace, env: MiniPacmanEnv) -> Callable[[S
             epsilon=0.0,
             seed=args.seed,
         )
-        agent.load(model_path)
+        if model_source == "checkpoint":
+            load_deep_q_checkpoint(agent, model_path)
+            agent.epsilon = 0.0
+        else:
+            agent.load(model_path)
         return lambda state: agent.select_action(env.state_vector(state))
 
     raise SystemExit(f"Unknown algorithm: {args.algorithm}")
 
 
-def default_model_path(algorithm: str) -> str:
-    paths = {
-        "q_learning": "models/final/q_learning/q_learning.pkl",
-        "dqn": "models/final/dqn/dqn.pt",
-        "double_dqn": "models/final/double_dqn/double_dqn.pt",
-    }
-    return paths[algorithm]
+def resolve_model_source(args: argparse.Namespace) -> tuple[Path, str]:
+    if args.model_path is not None:
+        model_path = Path(args.model_path)
+        if not model_path.exists():
+            raise SystemExit(f"Model file not found: {model_path}")
+        source = "checkpoint" if "_checkpoint" in model_path.stem else "model"
+        return model_path, source
+
+    model_path = Path(args.model_output or _default_model_output(args.algorithm, args.run_name))
+    checkpoint_base = Path(args.checkpoint_path or _default_checkpoint_path(args.algorithm, args.run_name))
+    checkpoint_path = latest_checkpoint_path(checkpoint_base)
+
+    if args.prefer_checkpoint and checkpoint_path.exists():
+        return checkpoint_path, "checkpoint"
+    if model_path.exists():
+        return model_path, "model"
+    if checkpoint_path.exists():
+        return checkpoint_path, "checkpoint"
+
+    raise SystemExit(
+        "No trained model or checkpoint found.\n"
+        f"Looked for final model: {model_path}\n"
+        f"Looked for checkpoint:  {checkpoint_base}"
+    )
+
+
+def _default_model_output(algorithm: str, run_name: str) -> str:
+    extension = MODEL_EXTENSIONS[algorithm]
+    return f"models/final/{algorithm}/{run_name}.{extension}"
+
+
+def _default_checkpoint_path(algorithm: str, run_name: str) -> str:
+    return f"models/checkpoints/{algorithm}/{run_name}/{run_name}_checkpoint.pkl"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Watch a trained Mini Pacman model in a GUI window.")
     parser.add_argument("--algorithm", choices=["q_learning", "dqn", "double_dqn"], default="q_learning")
     parser.add_argument("--config", default=None)
+    parser.add_argument("--run-name", default=None)
     parser.add_argument("--model-path", default=None)
+    parser.add_argument("--model-output", default=None)
+    parser.add_argument("--checkpoint-path", default=None)
+    parser.add_argument("--prefer-checkpoint", action="store_true")
     parser.add_argument("--episodes", type=int, default=3)
     parser.add_argument("--layout", choices=sorted(MiniPacmanEnv.LAYOUTS), default="medium")
     parser.add_argument("--max-steps", type=int, default=300)
@@ -651,13 +699,20 @@ def parse_args() -> argparse.Namespace:
             if key in WATCH_CONFIG_KEYS
         }
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.run_name is None:
+        args.run_name = Path(args.config).stem
+
+    for key in ("model_output", "checkpoint_path"):
+        value = getattr(args, key, None)
+        if isinstance(value, str):
+            setattr(args, key, value.format(run_name=args.run_name, algorithm=args.algorithm))
+
+    return args
 
 
 def main() -> None:
     args = parse_args()
-    if args.model_path is None and not args.map_only and not args.ghost_demo:
-        args.model_path = default_model_path(args.algorithm)
 
     env = MiniPacmanEnv(
         layout_name=args.layout,
@@ -667,11 +722,17 @@ def main() -> None:
         ghost_chase_probability=args.ghost_chase_probability,
         seed=args.seed,
     )
-    action_fn = (lambda _state: 1) if (args.map_only or args.ghost_demo) else build_action_fn(args, env)
+    if args.map_only or args.ghost_demo:
+        action_fn = lambda _state: 1
+    else:
+        model_path, model_source = resolve_model_source(args)
+        print(f"Watching {model_source}: {model_path}")
+        action_fn = build_action_fn(args, env, model_path, model_source)
+
     if args.ghost_demo:
         viewer_name = "ghost demo"
     else:
-        viewer_name = "map" if args.map_only else args.algorithm
+        viewer_name = "map" if args.map_only else f"{args.algorithm} {args.run_name}"
 
     root = tk.Tk()
     PacmanViewer(

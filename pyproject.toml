@@ -1,3 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mini-pacman"
+version = "0.1.0"
+description = "A reinforcement learning library for Mini Pacman"
+requires-python = ">=3.8"
+dependencies = [
+    "gymnasium>=0.29.0",
+    "pygame>=2.6.1",
+    "numpy>=2.0.0",
+    "tensorboard>=2.15.0",
+    "cloudpickle>=3.0.0",
+    "matplotlib>=3.8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "flake8>=7.0.0",
+    "mypy>=1.9.0",
+    "pre-commit>=3.0.0",
+]
+
+[project.scripts]
+run-q-learning = "src.training.train_q_learning:main"
+run-dqn = "src.training.train_dqn:main"
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]

@@ -78,7 +78,7 @@ def main() -> None:
         final_episode=int(rows[-1]["episode"]) if rows else start_episode - 1,
         final_metrics=rows[-1] if rows else None,
     )
-    print_saved_outputs(args.output, saved_model_output, args.history_output, status=status)
+    print_saved_outputs(args.output, saved_model_output, args.history_output, status=status, elapsed_sec=float(rows[-1]["elapsed_sec"]) if rows else None)
 
 
 if __name__ == "__main__":

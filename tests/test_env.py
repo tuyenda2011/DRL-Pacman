@@ -12,9 +12,11 @@ def test_reset_returns_tabular_state_and_vector() -> None:
     assert env.width == 15
     assert env.height == 15
     assert len(env.food_positions) == 62
+    assert len(env.bonus_fruit_positions) == 2
     assert len(env.ghost_positions) == 3
     assert len(state) == 10
     assert env.lives_remaining == 3
+    assert env.bonus_fruit_mask == 0b11
     assert vector.shape == (env.vector_size,)
     assert env.vector_size == 2 + (2 * env.ghost_count) + 1 + len(env.food_positions) + 14
     assert env.action_size == 4
@@ -146,6 +148,37 @@ def test_food_progress_reward_penalizes_moving_away_from_nearest_food() -> None:
     env.pacman_pos = (13, 5)
 
     assert env._food_progress_reward(previous_food_distance=0) == -0.03
+
+
+def test_bonus_fruit_can_be_eaten_once_for_reward() -> None:
+    env = MiniPacmanEnv(ghost_count=1, ghost_chase_probability=0.0, seed=1)
+    env.reset()
+    fruit = env.bonus_fruit_positions[0]
+    env.pacman_pos = (fruit[0], fruit[1] + 1)
+    env.ghost_positions = [(13, 13)]
+
+    result = env.step(3)
+
+    assert env.pacman_pos == fruit
+    assert result.info["bonus_fruit_eaten"] is True
+    assert result.info["bonus_fruits_remaining"] == 1
+    assert result.reward >= env.BONUS_FRUIT_REWARD
+
+    env.pacman_pos = (fruit[0], fruit[1] + 1)
+    env.ghost_positions = [(13, 13)]
+    result = env.step(3)
+
+    assert result.info["bonus_fruit_eaten"] is False
+    assert result.info["bonus_fruits_remaining"] == 1
+    assert result.reward < env.BONUS_FRUIT_REWARD
+
+
+def test_render_marks_available_bonus_fruit() -> None:
+    env = MiniPacmanEnv(seed=1)
+    env.reset()
+    row, col = env.bonus_fruit_positions[0]
+
+    assert env.render().splitlines()[row][col] == "C"
 
 
 def test_timeout_keeps_terminal_event_and_penalty() -> None:

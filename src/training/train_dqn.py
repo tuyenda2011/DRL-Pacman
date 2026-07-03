@@ -33,6 +33,8 @@ from src.training.logging_utils import (
     MetricRow,
     MetricsCsvLogger,
     append_training_run_log,
+    format_duration,
+    format_eta,
     maybe_render_env,
     print_episode_log,
     print_saved_outputs,
@@ -107,7 +109,7 @@ def train(args: argparse.Namespace) -> list[MetricRow]:
         final_episode=int(rows[-1]["episode"]) if rows else start_episode - 1,
         final_metrics=rows[-1] if rows else None,
     )
-    print_saved_outputs(args.output, saved_model_output, args.history_output, status=status)
+    print_saved_outputs(args.output, saved_model_output, args.history_output, status=status, elapsed_sec=float(rows[-1]["elapsed_sec"]) if rows else None)
     return rows
 
 
@@ -237,7 +239,9 @@ def run_deep_q_training(
                     loss=avg_loss,
                     extra=(
                         f"win_rate={win_rate:.2%} food={food_eaten}/{len(env.food_positions)} "
-                        f"complete={completion_rate:.2%} elapsed={elapsed_sec:.1f}s "
+                        f"complete={completion_rate:.2%} "
+                        f"elapsed={format_duration(elapsed_sec)} "
+                        f"eta={format_eta(elapsed_sec, episode, args.episodes)} "
                         f"buffer={len(agent.replay_buffer)} step={global_step}{warmup_text}"
                     ),
                 )

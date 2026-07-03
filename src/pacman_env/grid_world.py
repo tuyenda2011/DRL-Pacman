@@ -23,7 +23,8 @@ class StepResult:
 class MiniPacmanEnv:
     STEP_PENALTY = -0.1
     FOOD_REWARD = 10.0
-    WIN_REWARD = 50.0
+    BONUS_FRUIT_REWARD = 100.0
+    WIN_REWARD = 100.0
     CAUGHT_PENALTY = -50.0
     SURVIVAL_REWARD = 0.02
     FOOD_DISTANCE_GAIN_REWARD = 0.03
@@ -59,6 +60,7 @@ class MiniPacmanEnv:
     )
     MAX_GHOSTS = 3
     GHOST_NAMES = ("Blinky", "Pinky", "Inky")
+    BONUS_FRUIT_POSITIONS = ((3, 3), (11, 11))
 
     MEDIUM_LAYOUT = (
         "###############",
@@ -110,9 +112,11 @@ class MiniPacmanEnv:
 
         self.walls: set[Position] = set()
         self.food_positions: list[Position] = []
+        self.bonus_fruit_positions: list[Position] = []
         self.pacman_start: Position | None = None
         self.ghost_starts: list[Position] = []
         self._parse_layout()
+        self.bonus_fruit_positions = self._select_bonus_fruit_positions()
         self._validate_layout()
 
         # Precompute full BFS distance matrix once; eliminates per-step BFS.
@@ -122,6 +126,7 @@ class MiniPacmanEnv:
         self.pacman_pos = self.pacman_start
         self.ghost_positions = list(self.ghost_starts[: self.ghost_count])
         self.food_mask = 0
+        self.bonus_fruit_mask = 0
         self.lives_remaining = self.max_lives
         self.steps = 0
         self.last_pacman_action: Action = 1
@@ -142,6 +147,7 @@ class MiniPacmanEnv:
     def reset(self) -> State:
         self._reset_actor_positions()
         self.food_mask = (1 << len(self.food_positions)) - 1
+        self.bonus_fruit_mask = (1 << len(self.bonus_fruit_positions)) - 1
         self.lives_remaining = self.max_lives
         self.steps = 0
         return self._state()
@@ -165,15 +171,17 @@ class MiniPacmanEnv:
             return self._handle_caught(reward + self.CAUGHT_PENALTY)
 
         food_reward = self._eat_food_reward()
-        reward += food_reward
-        if food_reward == 0.0 and self.food_mask != 0:
+        bonus_fruit_reward = self._eat_bonus_fruit_reward()
+        bonus_fruit_eaten = bonus_fruit_reward > 0.0
+        reward += food_reward + bonus_fruit_reward
+        if food_reward == 0.0 and bonus_fruit_reward == 0.0 and self.food_mask != 0:
             reward += self._food_progress_reward(previous_food_distance)
         if self.food_mask == 0:
-            return self._finish(reward + self.WIN_REWARD, "win")
+            return self._finish(reward + self.WIN_REWARD, "win", bonus_fruit_eaten)
 
         self.ghost_positions = self._move_ghosts()
         if self._is_caught():
-            return self._handle_caught(reward + self.CAUGHT_PENALTY)
+            return self._handle_caught(reward + self.CAUGHT_PENALTY, bonus_fruit_eaten)
 
         reward += self._survival_reward(previous_ghost_distance)
 
@@ -186,7 +194,7 @@ class MiniPacmanEnv:
             self._state(),
             reward,
             done,
-            {"event": event, "steps": self.steps, "lives": self.lives_remaining},
+            self._step_info(event, bonus_fruit_eaten),
         )
 
     def state_vector(self, state: State | None = None) -> np.ndarray:
@@ -217,6 +225,9 @@ class MiniPacmanEnv:
             cells[row][col] = "#"
         for index, (row, col) in enumerate(self.food_positions):
             cells[row][col] = "." if self.food_mask & (1 << index) else " "
+        for index, (row, col) in enumerate(self.bonus_fruit_positions):
+            if self.bonus_fruit_mask & (1 << index):
+                cells[row][col] = "C"
         pacman_row, pacman_col = self.pacman_pos
         cells[pacman_row][pacman_col] = "P"
         for ghost_row, ghost_col in self.ghost_positions:
@@ -250,6 +261,17 @@ class MiniPacmanEnv:
             )
         if len(self.food_positions) > 63:
             raise ValueError("Food mask supports up to 63 food positions.")
+
+    def _select_bonus_fruit_positions(self) -> list[Position]:
+        unavailable = {self.pacman_start, *self.ghost_starts}
+        return [
+            position
+            for position in self.BONUS_FRUIT_POSITIONS
+            if 0 <= position[0] < self.height
+            and 0 <= position[1] < self.width
+            and position not in self.walls
+            and position not in unavailable
+        ]
 
     def _state(self) -> State:
         pacman_row, pacman_col = self.pacman_pos
@@ -493,6 +515,14 @@ class MiniPacmanEnv:
                 reward += self.FOOD_REWARD
         return reward
 
+    def _eat_bonus_fruit_reward(self) -> float:
+        reward = 0.0
+        for index, fruit_pos in enumerate(self.bonus_fruit_positions):
+            if self.pacman_pos == fruit_pos and self.bonus_fruit_mask & (1 << index):
+                self.bonus_fruit_mask &= ~(1 << index)
+                reward += self.BONUS_FRUIT_REWARD
+        return reward
+
     def _food_progress_reward(self, previous_food_distance: int | None) -> float:
         current_food_distance = self._nearest_food_distance()
         if previous_food_distance is None or current_food_distance is None:
@@ -558,7 +588,7 @@ class MiniPacmanEnv:
     def _nearest_position(self, origin: Position, positions: list[Position]) -> Position | None:
         if not positions:
             return None
-        return min(positions, key=lambda position: self._manhattan(origin, position))
+        return min(positions, key=lambda position: self._maze_distance(origin, position))
 
     def _relative_position_features(self, origin: Position, target: Position | None) -> list[float]:
         if target is None:
@@ -581,10 +611,10 @@ class MiniPacmanEnv:
         )
         return nearest_distance <= self.ACTION_DANGER_DISTANCE
 
-    def _handle_caught(self, reward: float) -> StepResult:
+    def _handle_caught(self, reward: float, bonus_fruit_eaten: bool = False) -> StepResult:
         self.lives_remaining -= 1
         if self.lives_remaining <= 0:
-            return self._finish(reward, "caught")
+            return self._finish(reward, "caught", bonus_fruit_eaten)
 
         self._reset_actor_positions()
         if self.steps >= self.max_steps:
@@ -592,23 +622,32 @@ class MiniPacmanEnv:
                 self._state(),
                 reward + self.TIMEOUT_PENALTY,
                 True,
-                {"event": "timeout", "steps": self.steps, "lives": self.lives_remaining},
+                self._step_info("timeout", bonus_fruit_eaten),
             )
 
         return StepResult(
             self._state(),
             reward,
             False,
-            {"event": "life_lost", "steps": self.steps, "lives": self.lives_remaining},
+            self._step_info("life_lost", bonus_fruit_eaten),
         )
 
-    def _finish(self, reward: float, event: str) -> StepResult:
+    def _finish(self, reward: float, event: str, bonus_fruit_eaten: bool = False) -> StepResult:
         return StepResult(
             self._state(),
             reward,
             True,
-            {"event": event, "steps": self.steps, "lives": self.lives_remaining},
+            self._step_info(event, bonus_fruit_eaten),
         )
+
+    def _step_info(self, event: str, bonus_fruit_eaten: bool = False) -> dict[str, object]:
+        return {
+            "event": event,
+            "steps": self.steps,
+            "lives": self.lives_remaining,
+            "bonus_fruit_eaten": bonus_fruit_eaten,
+            "bonus_fruits_remaining": self.bonus_fruit_mask.bit_count(),
+        }
 
     def _is_caught(self) -> bool:
         return self.pacman_pos in self.ghost_positions

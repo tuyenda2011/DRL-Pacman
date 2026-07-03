@@ -187,11 +187,34 @@ def maybe_render_env(render_text: str, episode: int, render_interval: int) -> No
         print()
 
 
+def format_duration(seconds: float) -> str:
+    """Format a duration in seconds as a human-readable string (e.g. '1h 23m 45s')."""
+    seconds = int(seconds)
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+    if minutes > 0:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"
+
+
+def format_eta(elapsed_sec: float, episode: int, total_episodes: int) -> str:
+    """Estimate remaining training time based on average time-per-episode so far."""
+    if episode <= 0:
+        return "?"
+    avg_sec_per_episode = elapsed_sec / episode
+    remaining_episodes = total_episodes - episode
+    eta_sec = avg_sec_per_episode * remaining_episodes
+    return format_duration(eta_sec)
+
+
 def print_saved_outputs(
     output: str,
     model_output: str | None,
     history_output: str | None = None,
     status: str = "completed",
+    elapsed_sec: float | None = None,
 ) -> None:
     if status == "interrupted":
         print("\nTraining interrupted.")
@@ -199,6 +222,8 @@ def print_saved_outputs(
         print("\nTraining skipped.")
     else:
         print("\nTraining completed.")
+    if elapsed_sec is not None:
+        print(f"Total time:       {format_duration(elapsed_sec)}")
     print(f"Metrics saved to: {Path(output)}")
     if model_output is None:
         print("Model saved to:   not saved")

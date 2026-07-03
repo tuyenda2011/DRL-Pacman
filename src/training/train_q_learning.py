@@ -25,6 +25,8 @@ from src.training.logging_utils import (
     MetricRow,
     MetricsCsvLogger,
     append_training_run_log,
+    format_duration,
+    format_eta,
     maybe_render_env,
     print_episode_log,
     print_saved_outputs,
@@ -175,7 +177,9 @@ def train(args: argparse.Namespace) -> list[MetricRow]:
                     event,
                     extra=(
                         f"win_rate={win_rate:.2%} food={food_eaten}/{len(env.food_positions)} "
-                        f"complete={completion_rate:.2%} elapsed={elapsed_sec:.1f}s "
+                        f"complete={completion_rate:.2%} "
+                        f"elapsed={format_duration(elapsed_sec)} "
+                        f"eta={format_eta(elapsed_sec, episode, args.episodes)} "
                         f"q_states={len(agent.q_table)}"
                     ),
                 )
@@ -218,7 +222,7 @@ def train(args: argparse.Namespace) -> list[MetricRow]:
         final_episode=int(all_rows[-1]["episode"]) if all_rows else start_episode - 1,
         final_metrics=all_rows[-1] if all_rows else None,
     )
-    print_saved_outputs(args.output, saved_model_output, args.history_output, status=run_status)
+    print_saved_outputs(args.output, saved_model_output, args.history_output, status=run_status, elapsed_sec=elapsed_sec)
     return all_rows
 
 
