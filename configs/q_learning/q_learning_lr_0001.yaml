@@ -4,7 +4,7 @@ learning_rate: 0.0001
 discount_factor: 0.99
 epsilon_start: 1.0
 epsilon_min: 0.05
-epsilon_decay: 0.999997
+epsilon_decay: 0.99985
 layout: medium
 max_steps: 700
 max_lives: 3
