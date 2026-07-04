@@ -34,12 +34,12 @@ LR_SWEEP_CONFIGS = [
     Path("configs/q_learning/q_learning_lr_0001.yaml"),
     Path("configs/dqn/dqn_lr_0001.yaml"),
     Path("configs/double_dqn/double_dqn_lr_0001.yaml"),
+    Path("configs/q_learning/q_learning_lr_0005.yaml"),
+    Path("configs/dqn/dqn_lr_0005.yaml"),
+    Path("configs/double_dqn/double_dqn_lr_0005.yaml"),
     Path("configs/q_learning/q_learning_lr_001.yaml"),
     Path("configs/dqn/dqn_lr_001.yaml"),
     Path("configs/double_dqn/double_dqn_lr_001.yaml"),
-    Path("configs/q_learning/q_learning_lr_01.yaml"),
-    Path("configs/dqn/dqn_lr_01.yaml"),
-    Path("configs/double_dqn/double_dqn_lr_01.yaml"),
 ]
 
 MODEL_EXTENSIONS = {
