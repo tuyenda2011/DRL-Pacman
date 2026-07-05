@@ -13,11 +13,20 @@ env/
 experiments/**/*.csv
 experiments/**/*.jsonl
 experiments/**/*.png
+!experiments/
+!experiments/plots/
+!experiments/plots/*.png
 
 # Model/checkpoint outputs
 models/**/*.pkl
 models/**/*.pt
 models/**/*.pth
+!models/
+!models/final/
+!models/final/**/
+!models/final/**/*.pkl
+!models/final/**/*.pt
+!models/final/**/*.pth
 
 # Local/editor noise
 .idea/

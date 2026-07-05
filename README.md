@@ -1,159 +1,376 @@
 # DRL-Pacman
 
-Project so sánh 3 cách tiếp cận Reinforcement Learning cho bài toán Pacman mini:
-- `Q-learning`: Baseline tabular, dễ hiểu, phù hợp khi state space nhỏ.
-- `DQN`: Dùng neural network để ước lượng Q-value, khắc phục hạn chế về bộ nhớ của Q-Table.
-- `Double DQN`: Biến thể DQN giúp giảm thiểu hiện tượng đánh giá quá mức (overestimation bias).
+DRL-Pacman là project thực nghiệm Reinforcement Learning trên môi trường Mini Pacman. Mục tiêu là huấn luyện, đánh giá và so sánh 3 thuật toán:
 
-Môi trường mặc định là map Pacman `15x15`, có `62` food, `4` power pellet, `2` cherry, `3` ghost, `3` mạng. Ghost thông minh được mô phỏng theo game gốc: `Blinky` (đuổi trực tiếp), `Pinky` (chặn đầu), `Inky` (chọn điểm chặn qua vector). Power pellet làm ghost chuyển sang trạng thái frightened để Pacman có thể ăn ghost trong thời gian ngắn; ghost bị ăn chỉ còn đôi mắt chạy về house, chờ vài bước rồi hồi sinh. Môi trường đã được tinh chỉnh tối ưu hiệu năng để train với tốc độ cực cao (sử dụng ma trận BFS tính sẵn).
+- `Q-learning`: baseline dạng Q-table.
+- `DQN`: deep Q-network dùng neural network để xấp xỉ Q-value.
+- `Double DQN`: biến thể DQN giảm overestimation bias khi chọn action.
 
----
+Project đã có đầy đủ pipeline: cấu hình train bằng YAML, checkpoint/resume, final model, metric CSV, biểu đồ so sánh và GUI xem agent chơi.
 
-## 🛠 Cấu Trúc Project
+## Kết Quả Hiện Tại
+
+Toàn bộ 9 run đã train tới `20000` episodes:
+
+```text
+3 thuật toán x 3 learning rate = 9 runs
+learning rates: 0.0001, 0.0005, 0.001
+```
+
+Bảng dưới đây lấy từ file `*_eval_metrics.csv` ở episode `20000`, với `20` evaluation episodes mỗi run.
+
+| Algorithm | LR | Avg reward | Avg completion | Win rate | Avg steps | Best completion |
+|---|---:|---:|---:|---:|---:|---:|
+| Double DQN | 0.0001 | 1247.154 | 99.76% | 95% | 148.30 | 100% |
+| Double DQN | 0.0005 | 1312.231 | 99.27% | 85% | 153.60 | 100% |
+| Double DQN | 0.001 | 1553.422 | 99.27% | 65% | 211.65 | 100% |
+| DQN | 0.0001 | 1125.694 | 98.55% | 75% | 157.85 | 100% |
+| DQN | 0.0005 | 1254.443 | 99.84% | 95% | 138.90 | 100% |
+| DQN | 0.001 | 1148.294 | 98.71% | 75% | 161.85 | 100% |
+| Q-learning | 0.0001 | 61.960 | 26.29% | 0% | 99.25 | 51.61% |
+| Q-learning | 0.0005 | 134.079 | 42.66% | 0% | 124.05 | 51.61% |
+| Q-learning | 0.001 | 165.472 | 46.29% | 0% | 134.40 | 54.84% |
+
+Tóm tắt nhanh:
+
+- `DQN` và `Double DQN` học tốt hơn rõ rệt so với `Q-learning` trong môi trường hiện tại.
+- `DQN lr=0.0005` và `Double DQN lr=0.0001` đạt win rate `95%`.
+- `Double DQN lr=0.001` có avg reward cao nhất, nhưng win rate thấp hơn hai run tốt nhất.
+- `Q-learning` không clear map trong eval cuối, nhưng completion vẫn tăng khi learning rate cao hơn.
+
+## Biểu Đồ Kết Quả
+
+### Reward
+
+| LR 0.0001 | LR 0.0005 | LR 0.001 |
+|---|---|---|
+| ![Reward 0.0001](experiments/plots/reward_0001.png) | ![Reward 0.0005](experiments/plots/reward_0005.png) | ![Reward 0.001](experiments/plots/reward_001.png) |
+
+### Completion Rate
+
+| LR 0.0001 | LR 0.0005 | LR 0.001 |
+|---|---|---|
+| ![Completion 0.0001](experiments/plots/completion_0001.png) | ![Completion 0.0005](experiments/plots/completion_0005.png) | ![Completion 0.001](experiments/plots/completion_001.png) |
+
+### Win Rate
+
+| LR 0.0001 | LR 0.0005 | LR 0.001 |
+|---|---|---|
+| ![Win rate 0.0001](experiments/plots/win_rate_0001.png) | ![Win rate 0.0005](experiments/plots/win_rate_0005.png) | ![Win rate 0.001](experiments/plots/win_rate_001.png) |
+
+### Steps
+
+| LR 0.0001 | LR 0.0005 | LR 0.001 |
+|---|---|---|
+| ![Steps 0.0001](experiments/plots/steps_0001.png) | ![Steps 0.0005](experiments/plots/steps_0005.png) | ![Steps 0.001](experiments/plots/steps_001.png) |
+
+### Loss
+
+`loss` chỉ áp dụng cho `DQN` và `Double DQN`.
+
+| LR 0.0001 | LR 0.0005 | LR 0.001 |
+|---|---|---|
+| ![Loss 0.0001](experiments/plots/loss_0001.png) | ![Loss 0.0005](experiments/plots/loss_0005.png) | ![Loss 0.001](experiments/plots/loss_001.png) |
+
+## Biểu Đồ Đã Sinh
+
+Biểu đồ nằm trong:
+
+```text
+experiments/plots/
+```
+
+Mặc định `compare_runs.py` sinh `15` ảnh:
+
+```text
+completion_0001.png
+completion_0005.png
+completion_001.png
+loss_0001.png
+loss_0005.png
+loss_001.png
+reward_0001.png
+reward_0005.png
+reward_001.png
+steps_0001.png
+steps_0005.png
+steps_001.png
+win_rate_0001.png
+win_rate_0005.png
+win_rate_001.png
+```
+
+Ý nghĩa:
+
+- `reward`: hiệu quả tổng thể của policy.
+- `completion`: tỉ lệ food/map agent hoàn thành được.
+- `win_rate`: tỉ lệ clear map.
+- `steps`: agent sống/chơi được bao lâu trong mỗi episode.
+- `loss`: chỉ so sánh `DQN` và `Double DQN`, vì `Q-learning` không có neural network loss.
+
+## Cấu Trúc Project
 
 ```text
 DRL-Pacman/
-|-- configs/               <-- File cấu hình siêu tham số (Hyperparameters)
+|-- configs/
 |   |-- q_learning/
 |   |-- dqn/
 |   `-- double_dqn/
-|-- experiments/           <-- Dữ liệu train và biểu đồ
-|   |-- metrics/           <-- Các file CSV ghi lại Reward, Win rate...
-|   |-- history/           <-- Lịch sử các lần chạy
-|   `-- plots/             <-- Biểu đồ so sánh
-|-- models/                <-- Trọng số / Q-Table đã train
-|   |-- final/             <-- Model cuối cùng
-|   `-- checkpoints/       <-- Model lưu định kỳ
+|-- experiments/
+|   |-- metrics/
+|   |-- history/
+|   `-- plots/
+|-- models/
+|   |-- final/
+|   `-- checkpoints/
+|-- scripts/
 |-- src/
-|   |-- algorithms/        <-- Core logic 3 thuật toán
-|   |-- pacman_env/        <-- Môi trường Mini Pacman
-|   `-- training/          <-- Script train, đánh giá, log, GUI
-|-- run_all_experiments.py <-- Script chạy tự động tất cả
-`-- tests/
+|   |-- algorithms/
+|   |-- pacman_env/
+|   `-- training/
+|-- tests/
+|-- requirements.txt
+`-- run_all_experiments.py
 ```
 
----
+## Cài Đặt
 
-## 🚀 Cài Đặt
+Repo hiện được chạy bằng env conda `DRL`.
 
-Môi trường yêu cầu `Python 3.10+` và cài đặt qua `requirements.txt`:
+```powershell
+conda activate DRL
+pip install -r requirements.txt
+```
 
-```bash
+Hoặc dùng venv:
+
+```powershell
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
 ```
-*(Lưu ý: Nếu bạn sử dụng conda, hãy dùng lệnh `conda activate DRL`)*
 
----
+Dependency chính:
 
-## ⚙️ Hướng Dẫn Train
+```text
+numpy
+torch
+matplotlib
+PyYAML
+pytest
+```
 
-Hệ thống của project hỗ trợ tính năng **Smart Checkpoint (Phân luồng thông minh)**. Bạn không cần phải lo về việc đặt tên file output hay lo sợ bị ghi đè dữ liệu cũ. Toàn bộ đường dẫn lưu Metrics, Models, History đều sẽ được trích xuất tự động dựa trên **Tên File YAML** cấu hình.
+GUI xem model dùng `tkinter`, thường có sẵn trong Python trên Windows.
 
-### Cách 1: Chạy Tự Động (Khuyên Dùng)
+## Cấu Hình Train
 
-Tôi đã thiết lập sẵn một script chạy 1-click. Lệnh này sẽ tự động chạy lần lượt cả 3 thuật toán (Q-Learning, DQN, Double DQN) theo đúng thứ tự, và cuối cùng tự động vẽ biểu đồ so sánh:
+Mỗi thuật toán có 3 learning rate:
 
-```bash
+```text
+0.0001 -> *_lr_0001.yaml
+0.0005 -> *_lr_0005.yaml
+0.001  -> *_lr_001.yaml
+```
+
+Tổng cộng 9 config:
+
+```text
+configs/q_learning/q_learning_lr_0001.yaml
+configs/q_learning/q_learning_lr_0005.yaml
+configs/q_learning/q_learning_lr_001.yaml
+configs/dqn/dqn_lr_0001.yaml
+configs/dqn/dqn_lr_0005.yaml
+configs/dqn/dqn_lr_001.yaml
+configs/double_dqn/double_dqn_lr_0001.yaml
+configs/double_dqn/double_dqn_lr_0005.yaml
+configs/double_dqn/double_dqn_lr_001.yaml
+```
+
+## Chạy Train
+
+Chạy bộ mặc định, tức 3 thuật toán với `lr=0.001`:
+
+```powershell
 python run_all_experiments.py
 ```
 
-Chạy đủ 9 cấu hình learning-rate:
+Chạy toàn bộ 9 config:
 
-```bash
+```powershell
 python run_all_experiments.py --all-lr
 ```
 
-Xem trạng thái từng cấu hình mà chưa train:
+Xem trạng thái mà không train:
 
-```bash
+```powershell
 python run_all_experiments.py --all-lr --status
 ```
 
-Chạy kiểu thông minh: cấu hình đã đủ episode thì bỏ qua, cấu hình đang dở có checkpoint hợp lệ thì tự resume, cấu hình mới thì train từ đầu:
+Chạy thông minh: skip run đã xong, resume run đang dở, train mới nếu chưa có artifact:
 
-```bash
+```powershell
 python run_all_experiments.py --all-lr --auto-resume
 ```
 
-Nếu checkpoint cũ không còn tương thích sau khi đổi map/state, dùng cờ này để xoá artifact của cấu hình lỗi và train lại từ đầu:
+Nếu checkpoint cũ không tương thích:
 
-```bash
+```powershell
 python run_all_experiments.py --all-lr --auto-resume --restart-incompatible
 ```
 
-### Cách 2: Chạy Thủ Công Từng Thuật Toán
+Chạy riêng một learning rate:
 
-Bạn có thể tự gọi các script train và chỉ định file cấu hình `.yaml`:
-
-```bash
-python -m src.training.train_q_learning --config configs/q_learning/q_learning_lr_01.yaml
-python -m src.training.train_dqn --config configs/dqn/dqn_lr_001.yaml
-python -m src.training.train_double_dqn --config configs/double_dqn/double_dqn_lr_001.yaml
+```powershell
+.\scripts\run_lr_0001.ps1
+.\scripts\run_lr_0005.ps1
+.\scripts\run_lr_001.ps1
 ```
 
-Ví dụ, khi bạn chỉ định file `dqn_lr_001.yaml`, hệ thống sẽ hiểu tên lượt chạy (run_name) là `dqn_lr_001` và tự động lưu vào các thư mục:
-- **CSV Output:** `experiments/metrics/dqn/dqn_lr_001_metrics.csv`
-- **History:** `experiments/history/dqn/dqn_lr_001_history.jsonl`
-- **Model Final:** `models/final/dqn/dqn_lr_001.pt`
-- **Checkpoints:** `models/checkpoints/dqn/dqn_lr_001/dqn_lr_001_checkpoint_epXXXX.pkl`
+Chạy thủ công một thuật toán:
 
-*(Nếu bạn muốn đổi tham số như Learning Rate, Epsilon, Layout... chỉ cần copy tạo file YAML mới và chạy. File output sẽ tự động rẽ sang một thư mục mới tinh).*
-
----
-
-## 🔄 Checkpoint & Resume (Tiếp Tục Train)
-
-Mặc định hệ thống tự lưu checkpoint mỗi `500` - `1000` episode. Nếu bạn bấm `Ctrl+C` giữa chừng, hệ thống sẽ dừng an toàn. 
-Để train tiếp từ chỗ bị đứt đoạn, chỉ cần thêm cờ `--resume`:
-
-```bash
-python -m src.training.train_dqn --config configs/dqn/dqn_lr_001.yaml --resume
+```powershell
+python -m src.training.train_q_learning --config configs/q_learning/q_learning_lr_0005.yaml
+python -m src.training.train_dqn --config configs/dqn/dqn_lr_0005.yaml
+python -m src.training.train_double_dqn --config configs/double_dqn/double_dqn_lr_0005.yaml
 ```
 
----
+Resume thủ công:
 
-## 📊 Vẽ Biểu Đồ So Sánh
+```powershell
+python -m src.training.train_dqn --config configs/dqn/dqn_lr_0005.yaml --resume
+```
 
-Khi bạn muốn so sánh kết quả (Reward, Tỷ lệ hoàn thành, Win Rate) của các lượt train với nhau, chỉ cần gọi script `compare_runs.py`:
+## Output Sau Train
 
-```bash
+Ví dụ với:
+
+```text
+configs/dqn/dqn_lr_0005.yaml
+```
+
+Output mặc định:
+
+```text
+experiments/metrics/dqn/dqn_lr_0005_metrics.csv
+experiments/metrics/dqn/dqn_lr_0005_eval_metrics.csv
+experiments/history/dqn/dqn_lr_0005_history.jsonl
+models/final/dqn/dqn_lr_0005.pt
+models/checkpoints/dqn/dqn_lr_0005/dqn_lr_0005_checkpoint_epXXXX.pkl
+```
+
+Final model hiện đã có đủ cho cả 9 run trong:
+
+```text
+models/final/
+```
+
+## Vẽ Lại Biểu Đồ
+
+Tạo lại toàn bộ biểu đồ mặc định:
+
+```powershell
 python -m src.training.compare_runs
 ```
 
-Script đã được nâng cấp để **Tự động quét toàn bộ thư mục `experiments/metrics/`** và vẽ mọi file CSV nó tìm thấy thành biểu đồ so sánh (được xuất ra tại `experiments/plots/training_comparison.png`).
+Mặc định script đọc train metrics và tạo ảnh theo format:
 
-*(Lưu ý: Nếu bạn chỉ muốn so sánh một vài file cụ thể, bạn có thể truyền đường dẫn của chúng đằng sau lệnh trên).*
-
----
-
-## 🎮 Xem Model Chơi (GUI)
-
-Bạn có thể xem trực tiếp Model của mình đã học được gì thông qua giao diện PyGame:
-
-```bash
-# Xem Q-Learning
-python -m src.training.watch_model --algorithm q_learning
-
-# Xem DQN
-python -m src.training.watch_model --algorithm dqn
-
-# Xem Double DQN
-python -m src.training.watch_model --algorithm double_dqn
-
-# Xem dung config/run cu the, vi du DQN lr=0.0001
-python -m src.training.watch_model --config configs/dqn/dqn_lr_0001.yaml
-
-# Uu tien checkpoint moi nhat thay vi final model
-python -m src.training.watch_model --config configs/dqn/dqn_lr_0001.yaml --prefer-checkpoint
+```text
+<metric>_<lr>.png
 ```
 
-Script sẽ tự động tìm kiếm file model final hoặc checkpoint mới nhất của thuật toán tương ứng để biểu diễn. Giao diện được thiết kế theo đúng phong cách Pac-Man cổ điển (nền đen, tường xanh Berkeley).
+Ví dụ:
 
----
+```text
+reward_0005.png
+completion_0005.png
+loss_0005.png
+```
 
-## 📝 Phân Tích & Đánh Giá
+Vẽ eval metrics:
 
-Chi tiết về độ phức tạp bộ nhớ, hiện tượng Overestimation Bias, và quá trình tối ưu hiệu năng của dự án đã được ghi chép và phân tích kỹ lưỡng ở file:
-`docs/comparison.md`
+```powershell
+python -m src.training.compare_runs --source eval
+```
+
+Vẽ cả train và eval:
+
+```powershell
+python -m src.training.compare_runs --source all
+```
+
+Gom tất cả vào một ảnh tổng:
+
+```powershell
+python -m src.training.compare_runs --combined
+```
+
+Chỉ vẽ một vài metric:
+
+```powershell
+python -m src.training.compare_runs --metrics reward completion
+```
+
+## Xem Model Chơi
+
+Mở launcher chọn final model:
+
+```powershell
+python -m src.training.watch_finals
+```
+
+Liệt kê model final:
+
+```powershell
+python -m src.training.watch_finals --list
+```
+
+Xem một thuật toán:
+
+```powershell
+python -m src.training.watch_finals --algorithm dqn
+```
+
+Chạy lần lượt toàn bộ final model:
+
+```powershell
+python -m src.training.watch_finals --all
+```
+
+Chỉnh tốc độ GUI:
+
+```powershell
+python -m src.training.watch_finals --algorithm double_dqn --all --delay-ms 150
+```
+
+Xem bằng config cụ thể:
+
+```powershell
+python -m src.training.watch_model --config configs/dqn/dqn_lr_0005.yaml
+```
+
+Ưu tiên checkpoint mới nhất thay vì final model:
+
+```powershell
+python -m src.training.watch_model --config configs/dqn/dqn_lr_0005.yaml --prefer-checkpoint
+```
+
+## Kiểm Tra
+
+Chạy test:
+
+```powershell
+pytest
+```
+
+Kiểm tra cú pháp script chính:
+
+```powershell
+python -m py_compile run_all_experiments.py src/training/watch_model.py src/training/watch_finals.py src/training/compare_runs.py
+```
+
+## Ghi Chú
+
+- `loss` chỉ có ý nghĩa với `DQN` và `Double DQN`.
+- `win_rate` có thể phẳng nếu agent chưa clear map ổn định; khi đó `reward` và `completion` thường hữu ích hơn để phân tích.
+- `steps` giúp phân biệt agent sống lâu thật sự với agent chỉ ăn nhanh rồi chết.
+- Phân tích chi tiết hơn nằm ở `docs/comparison.md`.
