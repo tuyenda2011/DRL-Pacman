@@ -35,8 +35,6 @@ Nhận xét chính:
 
 ## Demo
 
-GIF dưới đây dùng final model `DQN lr=0.0005`, được chọn vì đạt `95%` win rate và `99.84%` avg completion trong evaluation cuối.
-
 ![DQN lr=0.0005 playing Mini Pacman](docs/assets/demo_dqn_lr_0005.gif)
 
 Chạy GUI để xem model trực tiếp:
