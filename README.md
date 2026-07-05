@@ -88,9 +88,9 @@ DRL-Pacman/
 |-- experiments/
 |   |-- metrics/             # CSV train/eval metrics
 |   |-- history/             # JSONL lịch sử các lần train
-|   `-- plots/               # Biểu đồ kết quả được track lên GitHub
+|   `-- plots/               # Biểu đồ kết quả 
 |-- models/
-|   |-- final/               # Final model được track lên GitHub
+|   |-- final/               # Final model 
 |   `-- checkpoints/         # Checkpoint định kỳ, không track
 |-- scripts/                 # Script PowerShell theo learning rate
 |-- src/
