@@ -4,7 +4,7 @@ DRL-Pacman là project thực nghiệm Reinforcement Learning trên môi trườ
 
 Repo này đã có đầy đủ workflow cho một project hoàn chỉnh: cấu hình bằng YAML, checkpoint/resume, final model, evaluation metrics, biểu đồ so sánh, GUI xem agent chơi và GIF demo có thể tái tạo.
 
-## Kết Quả
+## Kết Quả Final Evaluation
 
 Toàn bộ `9` run đã train tới `20000` episodes:
 
@@ -13,6 +13,8 @@ Toàn bộ `9` run đã train tới `20000` episodes:
 learning rates: 0.0001, 0.0005, 0.001
 evaluation: 20 episodes mỗi run tại episode 20000
 ```
+
+Bảng dưới đây phản ánh hiệu năng của model sau khi train xong. Cột `Win rate` là tỉ lệ thắng trong `20` trận evaluation cuối tại episode `20000`, không phải win rate trung bình trên toàn bộ quá trình train.
 
 | Algorithm | LR | Avg reward | Avg completion | Win rate | Avg steps | Best completion |
 |---|---:|---:|---:|---:|---:|---:|
