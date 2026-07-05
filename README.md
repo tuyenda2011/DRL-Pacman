@@ -37,8 +37,6 @@ Nhận xét chính:
 
 ## Demo
 
-GIF dưới đây dùng final model `DQN lr=0.0005`, được chọn vì đạt `95%` win rate và `99.84%` avg completion trong evaluation cuối.
-
 ![DQN lr=0.0005 playing Mini Pacman](docs/assets/demo_dqn_lr_0005.gif)
 
 Chạy GUI để xem model trực tiếp:
@@ -262,33 +260,6 @@ python -m src.training.watch_model --config configs/dqn/dqn_lr_0005.yaml
 python -m src.training.watch_model --config configs/dqn/dqn_lr_0005.yaml --prefer-checkpoint
 ```
 
-## Artifacts
-
-Ví dụ output của `configs/dqn/dqn_lr_0005.yaml`:
-
-```text
-experiments/metrics/dqn/dqn_lr_0005_metrics.csv
-experiments/metrics/dqn/dqn_lr_0005_eval_metrics.csv
-experiments/history/dqn/dqn_lr_0005_history.jsonl
-models/final/dqn/dqn_lr_0005.pt
-models/checkpoints/dqn/dqn_lr_0005/dqn_lr_0005_checkpoint_epXXXX.pkl
-```
-
-Được track lên GitHub:
-
-```text
-experiments/plots/*.png
-models/final/**
-docs/assets/demo_dqn_lr_0005.gif
-```
-
-Không track:
-
-```text
-experiments/metrics/
-experiments/history/
-models/checkpoints/
-```
 
 ## Kiểm Tra
 
