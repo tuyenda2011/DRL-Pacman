@@ -26,6 +26,8 @@ GHOST_COLORS = ["#ff0000", "#ffb8ff", "#00ffff"]
 FRIGHTENED_BLUE = "#1f51ff"
 TEXT_COLOR = "#f4f4ff"
 DOOR_COLOR = "#ffb8d8"
+WIN_GREEN = "#00ff66"
+LOSE_RED = "#ff3333"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -141,7 +143,73 @@ def render_frame(
         draw_ghost(draw, board_x, board_y, cell_size, env, row, col, ghost_index)
 
     draw_pacman(draw, board_x, board_y, cell_size, env.pacman_pos[0], env.pacman_pos[1], last_action)
+    draw_terminal_banner(draw, width, height, cell_size, last_event)
     return image
+
+
+def draw_terminal_banner(
+    draw: ImageDraw.ImageDraw,
+    width: int,
+    height: int,
+    cell_size: int,
+    last_event: str,
+) -> None:
+    message = terminal_message(last_event)
+    if message is None:
+        return
+
+    font = load_display_font(max(16, int(cell_size * 0.72)))
+    detail_font = load_display_font(max(9, int(cell_size * 0.34)))
+    detail = "ALL DOTS CLEARED" if message == "You Win" else "GAME OVER"
+    color = WIN_GREEN if message == "You Win" else LOSE_RED
+    center_x = width / 2
+    center_y = height / 2
+    padding_x = cell_size * 2.2
+    padding_y = cell_size * 0.95
+
+    draw.rectangle(
+        (
+            center_x - padding_x,
+            center_y - padding_y,
+            center_x + padding_x,
+            center_y + padding_y,
+        ),
+        fill=BLACK,
+        outline=TEXT_COLOR,
+        width=max(2, int(cell_size * 0.08)),
+    )
+
+    message_bbox = draw.textbbox((0, 0), message, font=font)
+    message_width = message_bbox[2] - message_bbox[0]
+    message_height = message_bbox[3] - message_bbox[1]
+    message_x = center_x - message_width / 2
+    message_y = center_y - message_height * 0.75
+    draw.text((message_x + 2, message_y + 2), message, fill="#1a1a1a", font=font)
+    draw.text((message_x, message_y), message, fill=color, font=font)
+
+    detail_bbox = draw.textbbox((0, 0), detail, font=detail_font)
+    detail_width = detail_bbox[2] - detail_bbox[0]
+    draw.text(
+        (center_x - detail_width / 2, center_y + cell_size * 0.38),
+        detail,
+        fill=TEXT_COLOR,
+        font=detail_font,
+    )
+
+
+def terminal_message(last_event: str) -> str | None:
+    if last_event == "win":
+        return "You Win"
+    if last_event in {"caught", "timeout"}:
+        return "You Lose"
+    return None
+
+
+def load_display_font(size: int) -> ImageFont.ImageFont:
+    try:
+        return ImageFont.truetype("arial.ttf", size=size)
+    except OSError:
+        return ImageFont.load_default()
 
 
 def cell_center(board_x: int, board_y: int, cell_size: int, row: int, col: int) -> tuple[float, float]:

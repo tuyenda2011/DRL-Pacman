@@ -30,6 +30,8 @@ PACMAN_YELLOW = "#ffff3d"
 FOOD_COLOR = "#f4b08a"
 ARCADE_WHITE = "#f4f4ff"
 READY_YELLOW = "#ffe600"
+WIN_GREEN = "#00ff66"
+LOSE_RED = "#ff3333"
 FRIGHTENED_BLUE = "#1f51ff"
 FRIGHTENED_FLASH = "#f4f4ff"
 GHOST_DOOR_COLOR = "#ffb8d8"
@@ -250,6 +252,7 @@ class PacmanViewer:
             pacman_row, pacman_col = self.env.pacman_pos
             self.draw_pacman(pacman_row, pacman_col)
         self.draw_ready_banner()
+        self.draw_terminal_banner()
         self.draw_bottom_hud()
 
     def draw_title_hud(self) -> None:
@@ -547,6 +550,61 @@ class PacmanViewer:
             fill=READY_YELLOW,
             font=font,
         )
+
+    def draw_terminal_banner(self) -> None:
+        message = self._terminal_message()
+        if message is None:
+            return
+
+        font = ("Courier New", max(15, int(self.cell_size * 0.58)), "bold")
+        shadow_font = ("Courier New", max(15, int(self.cell_size * 0.58)), "bold")
+        detail_font = ("Courier New", max(8, int(self.cell_size * 0.25)), "bold")
+        x = self.board_x + self.board_width / 2
+        y = self.board_y + self.board_height * 0.50
+        padding_x = self.cell_size * 3.05
+        padding_y = self.cell_size * 0.86
+        color = WIN_GREEN if message == "You Win" else LOSE_RED
+        detail = "ALL DOTS CLEARED" if message == "You Win" else "GAME OVER"
+
+        self.canvas.create_rectangle(
+            x - padding_x,
+            y - padding_y,
+            x + padding_x,
+            y + padding_y,
+            fill=BLACK,
+            outline=ARCADE_WHITE,
+            width=max(2, int(self.cell_size * 0.07)),
+        )
+        self.canvas.create_text(
+            x + max(1, int(self.cell_size * 0.05)),
+            y + max(1, int(self.cell_size * 0.05)),
+            text=message,
+            fill="#1a1a1a",
+            font=shadow_font,
+        )
+        self.canvas.create_text(
+            x,
+            y,
+            text=message,
+            fill=color,
+            font=font,
+        )
+        self.canvas.create_text(
+            x,
+            y + self.cell_size * 0.54,
+            text=detail,
+            fill=ARCADE_WHITE,
+            font=detail_font,
+        )
+
+    def _terminal_message(self) -> str | None:
+        if self.map_only or self.ghost_demo or not self.done:
+            return None
+        if self.last_event == "win":
+            return "You Win"
+        if self.last_event in {"caught", "timeout"}:
+            return "You Lose"
+        return None
 
     def draw_bottom_hud(self) -> None:
         y = self.board_y + self.board_height + self.cell_size * 0.68
