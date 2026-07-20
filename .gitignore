@@ -9,14 +9,6 @@ tests/
 venv/
 env/
 
-# Training outputs
-experiments/**/*.csv
-experiments/**/*.jsonl
-experiments/**/*.png
-!experiments/
-!experiments/plots/
-!experiments/plots/*.png
-
 # Model/checkpoint outputs
 models/**/*.pkl
 models/**/*.pt
